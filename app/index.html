@@ -146,12 +146,26 @@ function $(id){ return document.getElementById(id); }
 function clamp(n,a,b){ return Math.max(a,Math.min(b,n)); }
 function pad2(n){ return String(n).padStart(2,'0'); }
 
+/* Built-in Firebase project — baked into the app so cloud mode works with no setup.
+   (A Firebase web config is public by design; security is enforced by RTDB rules.) */
+var FB_CONFIG = {
+  apiKey: "AIzaSyBVjmhkcfZ2zu5yMELkTnmurloX0K0fcGE",
+  authDomain: "water-monitor-oei2.firebaseapp.com",
+  databaseURL: "https://water-monitor-oei2-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "water-monitor-oei2",
+  storageBucket: "water-monitor-oei2.firebasestorage.app",
+  messagingSenderId: "59740657172",
+  appId: "1:59740657172:web:9e36a46c58ba4927e2b901",
+  measurementId: "G-57XL89N5KJ"
+};
+
 /* ---------- application state ---------- */
 var S = {
   deviceUrl: LS.getItem('wa_device') || '',
-  fbConfig:  LS.getItem('wa_fb_config') || '',   // firebaseConfig JSON (pasted from Firebase console)
+  fbConfig:  LS.getItem('wa_fb_config') || JSON.stringify(FB_CONFIG),   // built-in by default
   deviceId:  LS.getItem('wa_device_id')  || 'wateralarm-1',
-  mode:      LS.getItem('wa_mode') || (LS.getItem('wa_device') ? 'lan' : 'demo'),  // 'lan' | 'cloud' | 'demo'  (cloud = Firebase RTDB)
+  mode:      LS.getItem('wa_mode') || 'cloud',   // default: built-in Firebase cloud
+  connected: false,
   connected: false,
   _devPick:  null,
   pinLock:  LS.getItem('wa_pin_on') !== '0',   // lock Settings behind a PIN (default on)
@@ -274,12 +288,12 @@ function fbConnect(){
     _fbDb  = firebase.database(_fbApp);
   }catch(e){ toast('เริ่ม Firebase ไม่สำเร็จ'); return false; }
   var p = fbPaths();
-  _fbConnRef = _fbDb.ref('.info/connected');
-  _fbConnRef.on('value', function(s){ S.connected = !!s.val(); syncBadge(); });
+  // "online" = the device has written status data (not merely that Firebase is reachable)
   _fbStatusRef = _fbDb.ref(p.status);
   _fbStatusRef.on('value', function(snap){
     var d = snap.val();
     if(d){ S.connected=true; applyStatus(d); onLiveData(); }
+    else { S.connected=false; syncBadge(); }
   }, function(){ S.connected=false; syncBadge(); });
   return true;
 }
@@ -692,10 +706,10 @@ function viewDevice(){
 
   if(m==='cloud'){
     h+='<div class="card r18" style="padding:4px 16px;margin-bottom:12px;">'
-      +'<div style="padding:12px 0;border-bottom:.5px solid #E5E5EA;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">firebaseConfig (วางจาก Firebase Console)</div><textarea id="fb_cfg" rows="7" placeholder=\'{ "apiKey": "…", "databaseURL": "https://xxx.firebasedatabase.app", "projectId": "…" }\' style="font-family:monospace;font-size:13px;line-height:1.4;">'+esc(S.fbConfig)+'</textarea></div>'
+      +'<div style="padding:12px 0;border-bottom:.5px solid #E5E5EA;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">firebaseConfig (ตั้งค่าไว้ในแอปแล้ว — แก้ได้ถ้าต้องการ)</div><textarea id="fb_cfg" rows="7" placeholder=\'{ "apiKey": "…", "databaseURL": "https://xxx.firebasedatabase.app", "projectId": "…" }\' style="font-family:monospace;font-size:13px;line-height:1.4;">'+esc(S.fbConfig)+'</textarea></div>'
       +'<div style="padding:12px 0;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">Device ID</div><input id="fb_id" value="'+esc(S.deviceId)+'" style="font-family:monospace;"></div>'
     +'</div>';
-    h+='<div class="note">ใช้ <b>Firebase Realtime Database</b> ทั้งแอปและ ESP32 ต้องตั้ง <b>Device ID</b> เดียวกัน และชี้ Firebase project เดียวกัน จากนั้นใช้งานได้จากทุกที่ที่มีเน็ต — คัดลอก object <code>firebaseConfig</code> จากหน้า Project settings มาวางได้เลย</div>';
+    h+='<div class="note"><b>Firebase ตั้งค่าไว้ในแอปแล้ว</b> — แค่ตั้ง <b>Device ID</b> ให้ตรงกับ ESP32 แล้วกดเชื่อมต่อ ใช้งานได้จากทุกที่ที่มีเน็ต (จะเปลี่ยนไป Firebase project อื่น ก็วาง <code>firebaseConfig</code> ใหม่ทับได้)</div>';
     h+='<div class="btn btn-primary" onclick="connectCloud()">เชื่อมต่อ Firebase</div>';
   } else if(m==='lan'){
     h+='<div class="card pad r18" style="margin-bottom:12px;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">ที่อยู่อุปกรณ์ (IP หรือ hostname)</div><input id="dev_addr" value="'+esc(S.deviceUrl)+'" placeholder="192.168.1.50" style="font-family:monospace;"></div>';

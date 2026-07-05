@@ -17,6 +17,10 @@ UI ทั้งหมดอยู่ในโฟลเดอร์ `app/` (HTML/
 
 ## ตั้งค่า Firebase (ใช้ได้ทุกที่)
 
+> **แอปนี้ฝัง `firebaseConfig` ของโปรเจกต์ `water-monitor-oei2` ไว้ในตัวแล้ว** — เปิดแอปมาจะต่อ
+> โหมดคลาวด์อัตโนมัติ แค่ตั้ง **Device ID** ให้ตรงกับ ESP32 (ถ้าจะใช้ Firebase project ของตัวเอง
+> ค่อยวาง `firebaseConfig` ใหม่ทับที่ ตั้งค่า → อุปกรณ์ → คลาวด์) หัวข้อล่างนี้คือวิธีสร้างโปรเจกต์ใหม่เอง
+
 ### 1) สร้างโปรเจกต์ + Realtime Database
 1. ไป [Firebase Console](https://console.firebase.google.com/) → สร้างโปรเจกต์ (ฟรี Spark plan)
 2. เมนู **Build → Realtime Database → Create Database** เลือก location แล้วเริ่มแบบ **Test mode** (หรือ Locked แล้วตั้ง rules ตามด้านล่าง)
