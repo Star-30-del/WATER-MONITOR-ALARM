@@ -9,7 +9,6 @@
 |------|--------|-----------|
 | เว็บแอป (PWA) | [`app/`](app/) | UI ไฟล์เดียว 3 โหมด: คลาวด์ / Wi-Fi บ้าน / ทดลอง — ดู [app/README.md](app/README.md) |
 | เฟิร์มแวร์ | [`WATER_ALARM.ino`](WATER_ALARM.ino) | ESP32: อ่านเซนเซอร์, HTTP API + CORS, Firebase RTDB, Telegram |
-| แอป native (ทางเลือก) | [`android/`](android/) | Capacitor wrapper — ใช้ต่อเมื่ออยากลงสโตร์ |
 
 ## ใช้งานเป็นเว็บแอป (แนะนำ — ง่ายสุด)
 
@@ -43,4 +42,3 @@ git push -u origin main
 python -m http.server 8777 --directory app
 # เปิด http://localhost:8777/
 ```
-"# WATER-MONITOR-ALARM" 

@@ -1,7 +1,7 @@
 # ระบบตรวจสอบน้ำ — Water Monitor App
 
 แอปมือถือ (iOS + Android) สำหรับดูระดับน้ำแบบเรียลไทม์จากอุปกรณ์ **ESP32**
-UI ทั้งหมดอยู่ในโฟลเดอร์ `app/` (HTML/CSS/JS ไฟล์เดียว) ใช้เป็น **เว็บแอป/PWA** หรือห่อเป็นแอป native ด้วย Capacitor
+UI ทั้งหมดอยู่ในโฟลเดอร์ `app/` (HTML/CSS/JS ไฟล์เดียว) ใช้เป็น **เว็บแอป/PWA** ติดตั้งลงหน้าจอโฮมได้ทั้ง iOS/Android
 
 ## 3 โหมดการเชื่อมต่อ (เลือกที่หน้า ตั้งค่า → อุปกรณ์)
 
@@ -71,14 +71,8 @@ python -m http.server 8777 --directory app
 # เปิด http://localhost:8777/
 ```
 
-## Build เป็นแอป native (ทางเลือก — Capacitor)
-
-```bash
-npm install
-npx cap sync            # ทุกครั้งที่แก้ไฟล์ใน app/
-npx cap open android    # ต้องมี Android Studio → Run/Build APK
-# iOS: npx cap add ios แล้ว npx cap open ios (ต้องใช้ Mac + Xcode)
-```
+> ติดตั้งเป็นแอปได้เลยผ่าน PWA: เปิดลิงก์ (HTTPS) บนมือถือ → เมนูแชร์ → “เพิ่มลงหน้าจอโฮม”
+> ได้ไอคอนแอปทั้ง iOS และ Android โดยไม่ต้อง build
 
 ---
 

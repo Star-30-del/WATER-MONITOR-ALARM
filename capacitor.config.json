@@ -1,9 +1,0 @@
-{
-  "appId": "com.watermonitor.app",
-  "appName": "ระบบตรวจสอบน้ำ",
-  "webDir": "app",
-  "server": {
-    "androidScheme": "https",
-    "cleartext": true
-  }
-}
