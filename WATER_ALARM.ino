@@ -38,10 +38,10 @@ String chatId   = "-5181401248";
 //   - fbApiKey / fbDatabaseUrl : from the firebaseConfig object
 //   - fbUserEmail / fbUserPass : an Authentication user (Email/Password). Leave BOTH empty
 //     to sign in anonymously (then RTDB rules must allow auth != null or be in test mode).
-bool   fbEnabled     = false;
-String fbApiKey      = "";
-String fbDatabaseUrl = "";             // e.g. "https://xxxx-default-rtdb.firebasedatabase.app"
-String fbUserEmail   = "";
+bool   fbEnabled     = true;
+String fbApiKey      = "AIzaSyBVjmhkcfZ2zu5yMELkTnmurloX0K0fcGE";
+String fbDatabaseUrl = "https://water-monitor-oei2-default-rtdb.asia-southeast1.firebasedatabase.app";
+String fbUserEmail   = "";              // empty = anonymous sign-in (test-mode rules OK)
 String fbUserPass    = "";
 String deviceId      = "wateralarm-1"; // must match the "Device ID" set in the app
 
