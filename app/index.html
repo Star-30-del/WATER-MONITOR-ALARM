@@ -565,7 +565,7 @@ function viewHistory(){
     h+='<div style="text-align:center;padding:60px 20px;color:#8E8E93;"><div style="font-size:32px;margin-bottom:8px;">📋</div><div style="font-size:15px;">ไม่มีรายการในหมวดนี้</div></div>';
     return h;
   }
-  h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:0 4px;margin-bottom:10px;"><div style="font-size:13px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.3px;">วันนี้</div><div style="font-size:12px;color:#8E8E93;">'+rows.length+' รายการ</div></div>';
+  h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:0 4px;margin-bottom:10px;"><div style="font-size:13px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.3px;">วันนี้</div><div style="display:flex;align-items:center;gap:12px;"><span style="font-size:12px;color:#8E8E93;">'+rows.length+' รายการ</span><span onclick="clearHistory()" style="font-size:13px;font-weight:600;color:#FF3B30;cursor:pointer;">ล้าง</span></div></div>';
   h+='<div class="card" style="border-radius:18px;padding:16px 16px 4px;">';
   rows.forEach(function(r,i){
     var m=META[r.level]||META.wifi, last=i===rows.length-1;
@@ -581,6 +581,12 @@ function viewHistory(){
   return h;
 }
 function setFilter(k){ S.historyFilter=k; render(); }
+function clearHistory(){
+  S.log = [];
+  render();
+  toast('ล้างประวัติแล้ว');
+  if(S.mode!=='demo') postForm('/api/clearlog', {});   // also clear the log on the device
+}
 
 /* ---- Settings root ---- */
 function viewSettings(){
@@ -849,7 +855,7 @@ function onSlider(v){ if(S.simulating) toggleSimulate(); applyPercent(+v); updat
 
 /* expose handlers to inline onclick/oninput */
 Object.assign(window,{
-  nav:nav, setFilter:setFilter, onSlider:onSlider, toggleSimulate:toggleSimulate,
+  nav:nav, setFilter:setFilter, clearHistory:clearHistory, onSlider:onSlider, toggleSimulate:toggleSimulate,
   connectDevice:connectDevice, connectCloud:connectCloud, setDevMode:setDevMode, useDemo:useDemo, forgetWifi:forgetWifi,
   toggleToken:toggleToken, onTokenEdit:onTokenEdit, saveTelegram:saveTelegram, testTelegram:testTelegram,
   saveThresholds:saveThresholds, saveMessages:saveMessages,

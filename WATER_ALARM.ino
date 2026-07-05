@@ -327,6 +327,11 @@ void handleCalib() {
   sendOk();
 }
 
+void handleClearLog() {
+  logN = 0;
+  sendOk();
+}
+
 void handleForget() {
   sendOk();
   delay(300);
@@ -387,6 +392,8 @@ void handleCloudCommand(FirebaseJson &json) {
     if (json.get(r, "adcMin")) mn = r.to<int>();
     if (json.get(r, "adcMax")) mx = r.to<int>();
     if (mx > mn) { adcMin = mn; adcMax = mx; saveConfig(); }
+  } else if (action == "clearlog") {
+    logN = 0;
   } else if (action == "forget") {
     Firebase.RTDB.deleteNode(&fbdo, fbCmdPath().c_str());
     delay(200);
@@ -823,6 +830,7 @@ void setupWebServer() {
   server.on("/api/morning", HTTP_POST, handleMorning);
   server.on("/api/calib", HTTP_POST, handleCalib);
   server.on("/api/forget", HTTP_POST, handleForget);
+  server.on("/api/clearlog", HTTP_POST, handleClearLog);
   server.on("/api/cloud", HTTP_POST, handleCloud);
   server.begin();
 }
