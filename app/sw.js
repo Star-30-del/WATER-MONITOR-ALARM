@@ -3,12 +3,11 @@
      falls back to cache when offline).
    - Static assets (mqtt lib, icons, manifest): cache-first with runtime cache.
    - Device API calls (/api/*) are never cached. */
-var CACHE = 'water-monitor-v2';
+var CACHE = 'water-monitor-v3';
 var SHELL = [
   './',
   './index.html',
   './manifest.webmanifest',
-  './vendor/mqtt.min.js',
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];

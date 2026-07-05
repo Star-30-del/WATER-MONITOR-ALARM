@@ -9,7 +9,8 @@
 <meta name="apple-mobile-web-app-title" content="ระบบตรวจสอบน้ำ">
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icons/icon-192.png">
-<script src="./vendor/mqtt.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
 <title>ระบบตรวจสอบน้ำ</title>
 <style>
   :root{
@@ -145,11 +146,9 @@ function pad2(n){ return String(n).padStart(2,'0'); }
 /* ---------- application state ---------- */
 var S = {
   deviceUrl: LS.getItem('wa_device') || '',
-  cloudUrl:  LS.getItem('wa_cloud_url')  || '',
-  cloudUser: LS.getItem('wa_cloud_user') || '',
-  cloudPass: LS.getItem('wa_cloud_pass') || '',
+  fbConfig:  LS.getItem('wa_fb_config') || '',   // firebaseConfig JSON (pasted from Firebase console)
   deviceId:  LS.getItem('wa_device_id')  || 'wateralarm-1',
-  mode:      LS.getItem('wa_mode') || (LS.getItem('wa_device') ? 'lan' : 'demo'),  // 'lan' | 'cloud' | 'demo'
+  mode:      LS.getItem('wa_mode') || (LS.getItem('wa_device') ? 'lan' : 'demo'),  // 'lan' | 'cloud' | 'demo'  (cloud = Firebase RTDB)
   connected: false,
   _devPick:  null,
   screen: 'dashboard',
@@ -215,10 +214,19 @@ function applyStatus(d){
   if(typeof d.morningEnabled==='boolean') S.morningEnabled = d.morningEnabled;
   if(typeof d.morningHour==='number')     S.morningHour   = d.morningHour;
   if(d.msgMorning!=null) S.msgMorning = d.msgMorning;
-  if(Array.isArray(d.history) && d.history.length) S.history = d.history.slice();
-  if(Array.isArray(d.log)){
-    S.log = d.log.map(function(r,i){ return { id:i, level:r.level, message:r.message, time:r.time }; });
+  // RTDB may return arrays as objects ({0:..,1:..}) — normalise to arrays
+  var hist = toArray(d.history);
+  if(hist && hist.length) S.history = hist.map(Number).filter(function(v){ return !isNaN(v); });
+  var log = toArray(d.log);
+  if(log){
+    S.log = log.filter(Boolean).map(function(r,i){ return { id:i, level:r.level, message:r.message, time:r.time }; });
   }
+}
+function toArray(v){
+  if(v==null) return null;
+  if(Array.isArray(v)) return v;
+  if(typeof v==='object') return Object.keys(v).sort(function(a,b){return a-b;}).map(function(k){ return v[k]; });
+  return null;
 }
 
 /* refresh the visible screen from freshly-applied live data (LAN or cloud) */
@@ -238,42 +246,59 @@ function poll(){
     .catch(function(){ S.connected=false; syncBadge(); return false; });
 }
 
-/* --- Cloud (MQTT over WebSocket) --- */
-var _mqtt=null;
-function cloudTopics(){ var id=(S.deviceId||'wateralarm-1').trim(); return { status:'water/'+id+'/status', cmd:'water/'+id+'/cmd' }; }
-function mqttDisconnect(){ if(_mqtt){ try{ _mqtt.end(true); }catch(e){} _mqtt=null; } }
-function mqttConnect(){
-  mqttDisconnect();
-  if(typeof mqtt==='undefined'){ toast('โหลดไลบรารี MQTT ไม่ได้'); return; }
-  var url=(S.cloudUrl||'').trim();
-  if(!url){ toast('กรุณากรอกที่อยู่ broker'); return; }
-  var opts={ clientId:'wm-app-'+Math.random().toString(16).slice(2,10), clean:true, reconnectPeriod:3000, connectTimeout:8000 };
-  if(S.cloudUser) opts.username=S.cloudUser;
-  if(S.cloudPass) opts.password=S.cloudPass;
-  var t=cloudTopics();
-  try{ _mqtt=mqtt.connect(url, opts); }
-  catch(e){ toast('ที่อยู่ broker ไม่ถูกต้อง'); return; }
-  _mqtt.on('connect', function(){ S.connected=true; _mqtt.subscribe(t.status); onLiveData(); });
-  _mqtt.on('close',   function(){ S.connected=false; syncBadge(); });
-  _mqtt.on('offline', function(){ S.connected=false; syncBadge(); });
-  _mqtt.on('error',   function(){ S.connected=false; syncBadge(); });
-  _mqtt.on('message', function(topic, payload){
-    if(topic!==t.status) return;
-    try{ var d=JSON.parse(payload.toString()); S.connected=true; applyStatus(d); onLiveData(); }catch(e){}
-  });
+/* --- Cloud (Firebase Realtime Database) --- */
+var _fbApp=null, _fbDb=null, _fbStatusRef=null, _fbConnRef=null;
+function fbPaths(){ var id=(S.deviceId||'wateralarm-1').trim(); return { status:'devices/'+id+'/status', cmd:'devices/'+id+'/cmd' }; }
+function fbDisconnect(){
+  try{ if(_fbStatusRef) _fbStatusRef.off(); }catch(e){}
+  try{ if(_fbConnRef) _fbConnRef.off(); }catch(e){}
+  try{ if(_fbApp) _fbApp.delete(); }catch(e){}
+  _fbApp=_fbDb=_fbStatusRef=_fbConnRef=null;
 }
-function cloudPublishCmd(action, obj){
-  if(!_mqtt || !_mqtt.connected) return false;
-  _mqtt.publish(cloudTopics().cmd, JSON.stringify(Object.assign({action:action}, obj||{})));
+function fbConnect(){
+  fbDisconnect();
+  if(typeof firebase==='undefined'){ toast('โหลด Firebase SDK ไม่ได้ (ตรวจอินเทอร์เน็ต)'); return false; }
+  var cfg;
+  try{ cfg = parseFbConfig(S.fbConfig); }
+  catch(e){ toast('firebaseConfig ไม่ถูกต้อง'); return false; }
+  if(!cfg || !cfg.databaseURL){ toast('ต้องมี databaseURL ใน config'); return false; }
+  try{
+    _fbApp = firebase.initializeApp(cfg, 'wm-'+Date.now());
+    _fbDb  = firebase.database(_fbApp);
+  }catch(e){ toast('เริ่ม Firebase ไม่สำเร็จ'); return false; }
+  var p = fbPaths();
+  _fbConnRef = _fbDb.ref('.info/connected');
+  _fbConnRef.on('value', function(s){ S.connected = !!s.val(); syncBadge(); });
+  _fbStatusRef = _fbDb.ref(p.status);
+  _fbStatusRef.on('value', function(snap){
+    var d = snap.val();
+    if(d){ S.connected=true; applyStatus(d); onLiveData(); }
+  }, function(){ S.connected=false; syncBadge(); });
   return true;
+}
+// Accept a pasted firebaseConfig as JSON, a JS object literal, or a full snippet
+function parseFbConfig(txt){
+  txt = (txt||'').trim();
+  if(!txt) return null;
+  var m = txt.match(/\{[\s\S]*\}/);           // grab the {...} even if wrapped in code
+  if(m) txt = m[0];
+  try{ return JSON.parse(txt); }catch(e){}
+  // tolerate unquoted keys / single quotes (JS object literal from the console)
+  var fixed = txt.replace(/([{,]\s*)([A-Za-z0-9_]+)\s*:/g, '$1"$2":').replace(/'/g,'"').replace(/,(\s*})/g,'$1');
+  return JSON.parse(fixed);
+}
+function fbSendCmd(action, obj){
+  if(!_fbDb) return Promise.resolve(false);
+  var payload = Object.assign({ action:action, ts: Date.now() }, obj||{});
+  return _fbDb.ref(fbPaths().cmd).set(payload).then(function(){ return true; }).catch(function(){ return false; });
 }
 
 /* --- unified command sender: routes by connection mode --- */
 function postForm(path, obj){
   var action = path.split('/').pop();               // '/api/thresholds' -> 'thresholds'
   if(S.mode==='cloud'){
-    var sent = cloudPublishCmd(action, obj);
-    return Promise.resolve(sent ? {ok:true} : {ok:false, error:'ยังไม่เชื่อมต่อคลาวด์'});
+    if(!_fbDb) return Promise.resolve({ok:false, error:'ยังไม่เชื่อมต่อ Firebase'});
+    return fbSendCmd(action, obj).then(function(ok){ return ok ? {ok:true} : {ok:false, error:'ส่งคำสั่งไม่สำเร็จ'}; });
   }
   if(S.mode!=='lan' || !base()) return Promise.resolve({ok:true, demo:true});
   var body = new URLSearchParams(obj).toString();
@@ -590,13 +615,11 @@ function viewDevice(){
 
   if(m==='cloud'){
     h+='<div class="card r18" style="padding:4px 16px;margin-bottom:12px;">'
-      +'<div style="padding:12px 0;border-bottom:.5px solid #E5E5EA;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">Broker URL (WebSocket)</div><input id="cl_url" value="'+esc(S.cloudUrl)+'" placeholder="wss://xxxx.hivemq.cloud:8884/mqtt" style="font-family:monospace;font-size:14px;"></div>'
-      +'<div style="padding:12px 0;border-bottom:.5px solid #E5E5EA;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">Device ID</div><input id="cl_id" value="'+esc(S.deviceId)+'" style="font-family:monospace;"></div>'
-      +'<div style="padding:12px 0;border-bottom:.5px solid #E5E5EA;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">Username</div><input id="cl_user" value="'+esc(S.cloudUser)+'" autocomplete="off" style="font-family:monospace;"></div>'
-      +'<div style="padding:12px 0;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">Password</div><input id="cl_pass" type="password" value="'+esc(S.cloudPass)+'" autocomplete="off" style="font-family:monospace;"></div>'
+      +'<div style="padding:12px 0;border-bottom:.5px solid #E5E5EA;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">firebaseConfig (วางจาก Firebase Console)</div><textarea id="fb_cfg" rows="7" placeholder=\'{ "apiKey": "…", "databaseURL": "https://xxx.firebasedatabase.app", "projectId": "…" }\' style="font-family:monospace;font-size:13px;line-height:1.4;">'+esc(S.fbConfig)+'</textarea></div>'
+      +'<div style="padding:12px 0;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">Device ID</div><input id="fb_id" value="'+esc(S.deviceId)+'" style="font-family:monospace;"></div>'
     +'</div>';
-    h+='<div class="note">ใช้ MQTT over WebSocket (WSS) ของ cloud broker เช่น HiveMQ Cloud (มีแพ็กเกจฟรี) แอปและ ESP32 ต้องตั้ง <b>Device ID</b> เดียวกัน จากนั้นใช้งานได้จากทุกที่ที่มีอินเทอร์เน็ต ไม่ต้องเปิด port บนเราเตอร์</div>';
-    h+='<div class="btn btn-primary" onclick="connectCloud()">เชื่อมต่อคลาวด์</div>';
+    h+='<div class="note">ใช้ <b>Firebase Realtime Database</b> ทั้งแอปและ ESP32 ต้องตั้ง <b>Device ID</b> เดียวกัน และชี้ Firebase project เดียวกัน จากนั้นใช้งานได้จากทุกที่ที่มีเน็ต — คัดลอก object <code>firebaseConfig</code> จากหน้า Project settings มาวางได้เลย</div>';
+    h+='<div class="btn btn-primary" onclick="connectCloud()">เชื่อมต่อ Firebase</div>';
   } else if(m==='lan'){
     h+='<div class="card pad r18" style="margin-bottom:12px;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">ที่อยู่อุปกรณ์ (IP หรือ hostname)</div><input id="dev_addr" value="'+esc(S.deviceUrl)+'" placeholder="192.168.1.50" style="font-family:monospace;"></div>';
     h+='<div class="note">โทรศัพท์ต้องอยู่ Wi-Fi วงเดียวกับ ESP32 ดูที่อยู่ IP จาก Serial Monitor หรือข้อความ Telegram ตอนบูต (เช่น http://192.168.1.50)</div>';
@@ -611,7 +634,7 @@ function setDevMode(k){ S._devPick=k; render(); }
 function connectDevice(){
   var v=$('dev_addr').value.trim();
   if(!v){ toast('กรุณากรอกที่อยู่อุปกรณ์'); return; }
-  mqttDisconnect();
+  fbDisconnect();
   S.deviceUrl=v; LS.setItem('wa_device',v);
   S.mode='lan'; LS.setItem('wa_mode','lan'); S._devPick=null; S.connected=false; stopSim();
   toast('กำลังเชื่อมต่อ…');
@@ -621,18 +644,18 @@ function connectDevice(){
   });
 }
 function connectCloud(){
-  var url=$('cl_url').value.trim(), id=($('cl_id').value.trim()||'wateralarm-1');
-  var user=$('cl_user').value.trim(), pass=$('cl_pass').value;
-  if(!url){ toast('กรุณากรอก Broker URL'); return; }
-  S.cloudUrl=url; S.cloudUser=user; S.cloudPass=pass; S.deviceId=id;
-  LS.setItem('wa_cloud_url',url); LS.setItem('wa_cloud_user',user); LS.setItem('wa_cloud_pass',pass); LS.setItem('wa_device_id',id);
+  var cfg=$('fb_cfg').value.trim(), id=($('fb_id').value.trim()||'wateralarm-1');
+  if(!cfg){ toast('กรุณาวาง firebaseConfig'); return; }
+  try{ var parsed=parseFbConfig(cfg); if(!parsed || !parsed.databaseURL) throw 0; }
+  catch(e){ toast('firebaseConfig ไม่ถูกต้อง (ต้องมี databaseURL)'); return; }
+  S.fbConfig=cfg; S.deviceId=id;
+  LS.setItem('wa_fb_config',cfg); LS.setItem('wa_device_id',id);
   S.mode='cloud'; LS.setItem('wa_mode','cloud'); S._devPick=null; S.connected=false; stopSim();
-  toast('กำลังเชื่อมต่อคลาวด์…');
-  mqttConnect();
-  nav('dashboard');
+  toast('กำลังเชื่อมต่อ Firebase…');
+  if(fbConnect()) nav('dashboard');
 }
 function useDemo(){
-  mqttDisconnect();
+  fbDisconnect();
   S.mode='demo'; LS.setItem('wa_mode','demo'); S.connected=false; S._devPick=null;
   toast('เข้าสู่โหมดทดลอง'); nav('dashboard');
 }
@@ -842,8 +865,8 @@ tickClock();
 setInterval(tickClock, 15000);
 if(S.mode==='lan' && base()){
   poll().then(function(ok){ if(!ok) toast('เชื่อมต่ออุปกรณ์ไม่ได้ — แสดงข้อมูลล่าสุด'); });
-} else if(S.mode==='cloud' && S.cloudUrl){
-  mqttConnect();
+} else if(S.mode==='cloud' && S.fbConfig){
+  fbConnect();
 }
 setInterval(function(){ if(S.mode==='lan') poll(); }, 2000);
 

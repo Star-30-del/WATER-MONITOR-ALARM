@@ -4,8 +4,10 @@
 #include <WebServer.h>
 #include <Preferences.h>
 #include <time.h>
-#include <PubSubClient.h>   // MQTT client  (Library Manager: "PubSubClient" by Nick O'Leary)
-#include <ArduinoJson.h>    // JSON parse   (Library Manager: "ArduinoJson" v7+)
+// Cloud database — Library Manager: "Firebase Arduino Client Library for ESP8266 and ESP32" (by Mobizt)
+#include <Firebase_ESP_Client.h>
+#include "addons/TokenHelper.h"
+#include "addons/RTDBHelper.h"
 
 // ================= NTP =================
 const char* ntpServer = "pool.ntp.org";
@@ -30,16 +32,18 @@ String msgMorning = "ระบบกำลังออนไลน์ปกต�
 String botToken = "8648529966:AAEgrg85mQ4kxmNzgy5C9tiesQdENSdCTrw";
 String chatId   = "-5181401248";
 
-// ---- MQTT / Cloud (for the mobile app to reach the device from anywhere) ----
-// Fill these once with your cloud broker (e.g. a free HiveMQ Cloud cluster).
-// TLS is required — use the broker's MQTT port (usually 8883). The mobile app
-// connects to the SAME broker over WebSocket (wss, usually 8884) with the SAME deviceId.
-bool   mqttEnabled = false;
-String mqttHost    = "";              // e.g. "abcd1234.s1.eu.hivemq.cloud"
-int    mqttPort    = 8883;            // TLS
-String mqttUser    = "";
-String mqttPass    = "";
-String deviceId    = "wateralarm-1";  // must match the "Device ID" set in the app
+// ---- Firebase Realtime Database (so the mobile app can reach the device from anywhere) ----
+// Fill these from your Firebase project (Project settings + Realtime Database).
+// The mobile app points at the SAME project + SAME deviceId.
+//   - fbApiKey / fbDatabaseUrl : from the firebaseConfig object
+//   - fbUserEmail / fbUserPass : an Authentication user (Email/Password). Leave BOTH empty
+//     to sign in anonymously (then RTDB rules must allow auth != null or be in test mode).
+bool   fbEnabled     = false;
+String fbApiKey      = "";
+String fbDatabaseUrl = "";             // e.g. "https://xxxx-default-rtdb.firebasedatabase.app"
+String fbUserEmail   = "";
+String fbUserPass    = "";
+String deviceId      = "wateralarm-1"; // must match the "Device ID" set in the app
 
 // ================= RUNTIME =================
 float lastWaterPercent = 0;
@@ -61,10 +65,12 @@ int logN = 0;
 Preferences prefs;
 WebServer server(80);
 
-// MQTT over TLS
-WiFiClientSecure mqttNet;
-PubSubClient mqtt(mqttNet);
-unsigned long lastMqttPublish = 0, lastMqttReconnect = 0;
+// Firebase RTDB
+FirebaseData fbdo;          // read/write + command polling
+FirebaseAuth fbAuth;
+FirebaseConfig fbCfg;
+bool  fbInited = false;
+unsigned long lastFbPublish = 0, lastFbCmdPoll = 0;
 
 // ================= CONFIG STORAGE =================
 void loadConfig() {
@@ -83,12 +89,12 @@ void loadConfig() {
   msgMorning     = prefs.getString("msgMorn", msgMorning);
   botToken = prefs.getString("token", botToken);
   chatId   = prefs.getString("chatId", chatId);
-  mqttEnabled = prefs.getBool("mqEn", mqttEnabled);
-  mqttHost = prefs.getString("mqHost", mqttHost);
-  mqttPort = prefs.getInt("mqPort", mqttPort);
-  mqttUser = prefs.getString("mqUser", mqttUser);
-  mqttPass = prefs.getString("mqPass", mqttPass);
-  deviceId = prefs.getString("devId", deviceId);
+  fbEnabled     = prefs.getBool("fbEn", fbEnabled);
+  fbApiKey      = prefs.getString("fbKey", fbApiKey);
+  fbDatabaseUrl = prefs.getString("fbUrl", fbDatabaseUrl);
+  fbUserEmail   = prefs.getString("fbEmail", fbUserEmail);
+  fbUserPass    = prefs.getString("fbPass", fbUserPass);
+  deviceId      = prefs.getString("devId", deviceId);
   prefs.end();
 }
 
@@ -108,11 +114,11 @@ void saveConfig() {
   prefs.putString("msgMorn", msgMorning);
   prefs.putString("token", botToken);
   prefs.putString("chatId", chatId);
-  prefs.putBool("mqEn", mqttEnabled);
-  prefs.putString("mqHost", mqttHost);
-  prefs.putInt("mqPort", mqttPort);
-  prefs.putString("mqUser", mqttUser);
-  prefs.putString("mqPass", mqttPass);
+  prefs.putBool("fbEn", fbEnabled);
+  prefs.putString("fbKey", fbApiKey);
+  prefs.putString("fbUrl", fbDatabaseUrl);
+  prefs.putString("fbEmail", fbUserEmail);
+  prefs.putString("fbPass", fbUserPass);
   prefs.putString("devId", deviceId);
   prefs.end();
 }
@@ -236,7 +242,7 @@ void checkWaterLevelAnalog() {
   }
 }
 
-// ================= JSON STATUS (shared by HTTP + MQTT) =================
+// ================= JSON STATUS (shared by HTTP + Firebase) =================
 String buildStatusJson() {
   float ma = 4.0f + (lastWaterPercent / 100.0f) * 16.0f;
   String j = "{";
@@ -250,7 +256,7 @@ String buildStatusJson() {
   j += "\"ssid\":\"" + jsonEscape(WiFi.SSID()) + "\",";
   j += "\"token\":\"" + jsonEscape(botToken) + "\",\"chatId\":\"" + jsonEscape(chatId) + "\",";
   j += "\"morningEnabled\":" + String(morningEnabled ? "true" : "false") + ",\"morningHour\":" + String(morningHour) + ",\"msgMorning\":\"" + jsonEscape(msgMorning) + "\",";
-  j += "\"mqttEnabled\":" + String(mqttEnabled ? "true" : "false") + ",\"mqttHost\":\"" + jsonEscape(mqttHost) + "\",\"deviceId\":\"" + jsonEscape(deviceId) + "\",";
+  j += "\"cloudEnabled\":" + String(fbEnabled ? "true" : "false") + ",\"deviceId\":\"" + jsonEscape(deviceId) + "\",";
   j += "\"history\":[";
   for (int i = 0; i < histCount; i++) { if (i) j += ","; j += String(histBuf[i]); }
   j += "],\"log\":[";
@@ -331,95 +337,107 @@ void handleForget() {
   ESP.restart();
 }
 
-// ================= MQTT (cloud, used by the mobile app from anywhere) =================
-void mqttPublishStatus() {
-  if (!mqtt.connected()) return;
-  String topic = "water/" + deviceId + "/status";
-  String j = buildStatusJson();
-  mqtt.publish(topic.c_str(), (const uint8_t*)j.c_str(), j.length(), true); // retained
+// ================= FIREBASE (cloud, used by the mobile app from anywhere) =================
+String fbStatusPath() { return "/devices/" + deviceId + "/status"; }
+String fbCmdPath()    { return "/devices/" + deviceId + "/cmd"; }
+
+void fbPublishStatus() {
+  if (!fbInited || !Firebase.ready()) return;
+  FirebaseJson json;
+  json.setJsonData(buildStatusJson());          // reuse the same JSON as the HTTP API
+  Firebase.RTDB.setJSON(&fbdo, fbStatusPath().c_str(), &json);
 }
 
-// Handle a command JSON published by the app to water/<deviceId>/cmd
-void mqttCallback(char* topic, byte* payload, unsigned int len) {
-  JsonDocument doc;
-  if (deserializeJson(doc, payload, len)) return;         // ignore malformed
-  String action = doc["action"] | "";
+// Apply one command object (the app writes it to /devices/<id>/cmd)
+void handleCloudCommand(FirebaseJson &json) {
+  FirebaseJsonData r;
+  String action;
+  if (json.get(r, "action")) action = r.to<String>();
+  if (action == "") return;
 
   if (action == "thresholds") {
-    int h = doc["high"] | highPct, m = doc["med"] | medPct, l = doc["low"] | lowPct, y = doc["hyst"] | hystPct;
+    int h = highPct, m = medPct, l = lowPct, y = hystPct;
+    if (json.get(r, "high")) h = r.to<int>();
+    if (json.get(r, "med"))  m = r.to<int>();
+    if (json.get(r, "low"))  l = r.to<int>();
+    if (json.get(r, "hyst")) y = r.to<int>();
     if (l >= 0 && l < m && m < h && h <= 100 && y >= 0 && y <= 20) {
       highPct = h; medPct = m; lowPct = l; hystPct = y;
       saveConfig();
-      currentBand = decideBand(lastWaterPercent, 1);       // re-evaluate quietly
+      currentBand = decideBand(lastWaterPercent, 1);   // re-evaluate quietly
     }
   } else if (action == "messages") {
-    if (!doc["high"].isNull()) msgHigh   = doc["high"].as<String>();
-    if (!doc["med"].isNull())  msgMedium = doc["med"].as<String>();
-    if (!doc["low"].isNull())  msgLow    = doc["low"].as<String>();
+    if (json.get(r, "high")) msgHigh   = r.to<String>();
+    if (json.get(r, "med"))  msgMedium = r.to<String>();
+    if (json.get(r, "low"))  msgLow    = r.to<String>();
     saveConfig();
   } else if (action == "telegram") {
-    if (!doc["token"].isNull())  botToken = doc["token"].as<String>();
-    if (!doc["chatId"].isNull()) chatId   = doc["chatId"].as<String>();
+    if (json.get(r, "token"))  botToken = r.to<String>();
+    if (json.get(r, "chatId")) chatId   = r.to<String>();
     saveConfig();
   } else if (action == "test") {
     if (sendTelegramMessage("📩 ทดสอบส่งข้อความสำเร็จ")) addLog("wifi", "📩 ทดสอบส่งข้อความสำเร็จ");
   } else if (action == "morning") {
-    if (!doc["enabled"].isNull()) morningEnabled = ((int)doc["enabled"]) != 0;
-    int hr = doc["hour"] | morningHour;
-    if (hr >= 0 && hr <= 23) morningHour = hr;
-    if (!doc["msg"].isNull()) msgMorning = doc["msg"].as<String>();
+    if (json.get(r, "enabled")) morningEnabled = r.to<int>() != 0;
+    if (json.get(r, "hour"))   { int hr = r.to<int>(); if (hr >= 0 && hr <= 23) morningHour = hr; }
+    if (json.get(r, "msg"))     msgMorning = r.to<String>();
     saveConfig();
   } else if (action == "calib") {
-    int mn = doc["adcMin"] | adcMin, mx = doc["adcMax"] | adcMax;
+    int mn = adcMin, mx = adcMax;
+    if (json.get(r, "adcMin")) mn = r.to<int>();
+    if (json.get(r, "adcMax")) mx = r.to<int>();
     if (mx > mn) { adcMin = mn; adcMax = mx; saveConfig(); }
   } else if (action == "forget") {
-    mqttPublishStatus(); delay(200);
+    Firebase.RTDB.deleteNode(&fbdo, fbCmdPath().c_str());
+    delay(200);
     WiFi.disconnect(true, true); delay(500);
     WiFiManager wm; wm.resetSettings(); delay(500);
     ESP.restart();
   }
-  mqttPublishStatus();   // echo new state back to the app immediately
+  fbPublishStatus();   // echo new state back to the app immediately
 }
 
-void setupMqtt() {
-  mqttNet.setInsecure();               // skip cert validation (fine for hobby use)
-  mqtt.setServer(mqttHost.c_str(), mqttPort);
-  mqtt.setCallback(mqttCallback);
-  mqtt.setBufferSize(8192);            // status JSON (history + 20 logs of Thai text) is large
-  mqtt.setKeepAlive(30);
-}
-
-void mqttReconnect() {
-  if (!mqttEnabled || mqttHost == "" || !WiFi.isConnected()) return;
-  if (mqtt.connected()) return;
-  if (millis() - lastMqttReconnect < 5000) return;
-  lastMqttReconnect = millis();
-
-  String cid = "wm-" + deviceId + "-" + String((uint32_t)ESP.getEfuseMac(), HEX);
-  bool ok = mqttUser.length()
-              ? mqtt.connect(cid.c_str(), mqttUser.c_str(), mqttPass.c_str())
-              : mqtt.connect(cid.c_str());
-  if (ok) {
-    String cmdTopic = "water/" + deviceId + "/cmd";
-    mqtt.subscribe(cmdTopic.c_str());
-    addLog("wifi", "☁️ เชื่อมต่อคลาวด์แล้ว");
-    mqttPublishStatus();
+// Poll the command node; run it, then clear it so it isn't run twice
+void fbPollCommands() {
+  if (!fbInited || !Firebase.ready()) return;
+  if (Firebase.RTDB.getJSON(&fbdo, fbCmdPath().c_str())) {
+    if (fbdo.dataType() == "json") {
+      FirebaseJson &json = fbdo.jsonObject();
+      handleCloudCommand(json);
+      Firebase.RTDB.deleteNode(&fbdo, fbCmdPath().c_str());
+    }
   }
 }
 
-// LAN endpoint so the app (on same Wi-Fi) can configure the cloud broker
-void handleMqtt() {
-  mqttEnabled = (server.arg("enabled") == "1");
-  if (server.hasArg("host"))     mqttHost = server.arg("host");
-  if (server.hasArg("port"))     mqttPort = server.arg("port").toInt();
-  if (server.hasArg("user"))     mqttUser = server.arg("user");
-  if (server.hasArg("pass"))     mqttPass = server.arg("pass");
-  if (server.hasArg("deviceId")) deviceId = server.arg("deviceId");
+void setupFirebase() {
+  if (!fbEnabled || fbDatabaseUrl == "") return;
+  fbCfg.api_key      = fbApiKey.c_str();
+  fbCfg.database_url = fbDatabaseUrl.c_str();
+  fbCfg.token_status_callback = tokenStatusCallback;   // from addons/TokenHelper.h
+  if (fbUserEmail.length()) {
+    fbAuth.user.email    = fbUserEmail.c_str();
+    fbAuth.user.password = fbUserPass.c_str();
+  } else {
+    Firebase.signUp(&fbCfg, &fbAuth, "", "");           // anonymous sign-in
+  }
+  Firebase.begin(&fbCfg, &fbAuth);
+  Firebase.reconnectWiFi(true);
+  fbdo.setBSSLBufferSize(4096, 1024);
+  fbInited = true;
+}
+
+// LAN endpoint so the app (on same Wi-Fi) can configure Firebase on the device
+void handleCloud() {
+  fbEnabled = (server.arg("enabled") == "1");
+  if (server.hasArg("apiKey"))   fbApiKey      = server.arg("apiKey");
+  if (server.hasArg("dbUrl"))    fbDatabaseUrl = server.arg("dbUrl");
+  if (server.hasArg("email"))    fbUserEmail   = server.arg("email");
+  if (server.hasArg("pass"))     fbUserPass    = server.arg("pass");
+  if (server.hasArg("deviceId")) deviceId      = server.arg("deviceId");
   saveConfig();
   sendOk();
-  mqtt.disconnect();
-  setupMqtt();
-  lastMqttReconnect = 0;   // reconnect promptly with new settings
+  delay(200);
+  ESP.restart();   // simplest reliable way to re-init Firebase with new creds
 }
 
 // ================= WEB PAGE (embedded) =================
@@ -805,7 +823,7 @@ void setupWebServer() {
   server.on("/api/morning", HTTP_POST, handleMorning);
   server.on("/api/calib", HTTP_POST, handleCalib);
   server.on("/api/forget", HTTP_POST, handleForget);
-  server.on("/api/mqtt", HTTP_POST, handleMqtt);
+  server.on("/api/cloud", HTTP_POST, handleCloud);
   server.begin();
 }
 
@@ -874,7 +892,7 @@ void setup() {
   loadConfig();
   startWiFi();
   setupWebServer();
-  setupMqtt();
+  setupFirebase();
 }
 
 // ================= LOOP =================
@@ -909,13 +927,15 @@ void loop() {
     pushHistory((int)round(lastWaterPercent));
   }
 
-  // MQTT: keep the cloud link alive + push status ~ทุก 3 วินาที
-  if (mqttEnabled) {
-    if (mqtt.connected()) mqtt.loop();
-    else mqttReconnect();
-    if (mqtt.connected() && millis() - lastMqttPublish > 3000) {
-      lastMqttPublish = millis();
-      mqttPublishStatus();
+  // Firebase: push status ~ทุก 3 วินาที และเช็คคำสั่งจากแอป ~ทุก 1.5 วินาที
+  if (fbEnabled && fbInited && Firebase.ready()) {
+    if (millis() - lastFbPublish > 3000) {
+      lastFbPublish = millis();
+      fbPublishStatus();
+    }
+    if (millis() - lastFbCmdPoll > 1500) {
+      lastFbCmdPoll = millis();
+      fbPollCommands();
     }
   }
 

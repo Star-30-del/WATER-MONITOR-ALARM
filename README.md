@@ -1,14 +1,14 @@
 # ระบบตรวจสอบน้ำ — Water Monitor
 
 ระบบตรวจสอบระดับน้ำด้วย **ESP32** (เซนเซอร์ 4–20mA) + **เว็บแอป/PWA** ที่ใช้ได้ทั้ง iOS และ Android
-จากทุกที่ผ่านคลาวด์ (MQTT) พร้อมแจ้งเตือน Telegram
+จากทุกที่ผ่านคลาวด์ (**Firebase Realtime Database**) พร้อมแจ้งเตือน Telegram
 
 ## โครงสร้าง
 
 | ส่วน | ที่อยู่ | รายละเอียด |
 |------|--------|-----------|
 | เว็บแอป (PWA) | [`app/`](app/) | UI ไฟล์เดียว 3 โหมด: คลาวด์ / Wi-Fi บ้าน / ทดลอง — ดู [app/README.md](app/README.md) |
-| เฟิร์มแวร์ | [`WATER_ALARM.ino`](WATER_ALARM.ino) | ESP32: อ่านเซนเซอร์, HTTP API + CORS, MQTT cloud, Telegram |
+| เฟิร์มแวร์ | [`WATER_ALARM.ino`](WATER_ALARM.ino) | ESP32: อ่านเซนเซอร์, HTTP API + CORS, Firebase RTDB, Telegram |
 | แอป native (ทางเลือก) | [`android/`](android/) | Capacitor wrapper — ใช้ต่อเมื่ออยากลงสโตร์ |
 
 ## ใช้งานเป็นเว็บแอป (แนะนำ — ง่ายสุด)
@@ -34,8 +34,8 @@ git push -u origin main
 
 ## เชื่อมต่ออุปกรณ์จากทุกที่ (คลาวด์)
 
-ตั้ง cloud broker (เช่น HiveMQ Cloud ฟรี) ให้ทั้ง ESP32 และแอปใช้ **Device ID เดียวกัน**
-ขั้นตอนละเอียดอยู่ใน [app/README.md](app/README.md)
+ใช้ **Firebase Realtime Database** (ฟรี) ให้ทั้ง ESP32 และแอปชี้โปรเจกต์เดียวกัน + **Device ID เดียวกัน**
+ขั้นตอนละเอียด (สร้างโปรเจกต์, rules, ใส่ config) อยู่ใน [app/README.md](app/README.md)
 
 ## ทดสอบในเครื่อง
 
