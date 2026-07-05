@@ -521,7 +521,7 @@ function viewDashboard(){
     +'</div>'
   +'</div>';
 
-  // Simulator card — demo mode only
+  // Simulator card — demo mode only (live modes show nothing extra here)
   if(S.mode==='demo'){
     h+='<div class="card pad" style="margin-top:16px;">'
       +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">'
@@ -529,13 +529,6 @@ function viewDashboard(){
         +'<div id="d_simbtn" onclick="toggleSimulate()" style="width:40px;height:40px;border-radius:20px;background:'+(S.simulating?'#FF3B30':'#0A84FF')+';display:flex;align-items:center;justify-content:center;cursor:pointer;">'+simIcon()+'</div>'
       +'</div>'
       +'<input id="d_slider" type="range" min="0" max="100" value="'+S.percent+'" oninput="onSlider(this.value)" style="width:100%;">'
-    +'</div>';
-  } else {
-    h+='<div class="card pad" style="margin-top:16px;display:flex;align-items:center;gap:12px;">'
-      +'<div style="width:34px;height:34px;border-radius:9px;background:#EAF0FF;display:flex;align-items:center;justify-content:center;flex-shrink:0;">📡</div>'
-      +'<div style="flex:1;"><div style="font-size:14px;font-weight:600;color:#1C1C1E;">'+(S.connected?(S.mode==='cloud'?'รับข้อมูลสดผ่านคลาวด์':'รับข้อมูลสดจากอุปกรณ์'):'กำลังเชื่อมต่อ…')+'</div>'
-      +'<div style="font-size:12px;color:#8E8E93;">'+esc(S.mode==='cloud'?('คลาวด์ · '+S.deviceId):(base()||'ยังไม่ตั้งค่าที่อยู่'))+'</div></div>'
-      +'<div onclick="nav(\'device\')" style="font-size:14px;color:#0A84FF;font-weight:600;cursor:pointer;">ตั้งค่า</div>'
     +'</div>';
   }
   return h;
