@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#F2F2F7">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="ระบบตรวจสอบน้ำ">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<script src="./vendor/mqtt.min.js"></script>
+<title>ระบบตรวจสอบน้ำ</title>
+<style>
+  :root{
+    --bg:#F2F2F7; --card:#fff; --txt:#1C1C1E; --sub:#8E8E93;
+    --blue:#0A84FF; --orange:#FF9500; --red:#FF3B30; --green:#22C55E; --sep:#E5E5EA;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:-apple-system,system-ui,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+    background:#e5e5ea;color:var(--txt);
+    min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;
+  }
+  /* Phone frame on desktop; full-bleed on mobile */
+  #stage{padding:40px;width:100%;display:flex;align-items:center;justify-content:center;}
+  #device{
+    position:relative;width:402px;height:min(874px,94vh);
+    background:var(--bg);border-radius:52px;overflow:hidden;
+    box-shadow:0 30px 70px rgba(0,0,0,.28),0 0 0 12px #1a1a1c,0 0 0 14px #2c2c2e;
+    display:flex;flex-direction:column;
+  }
+  @media (max-width:640px){
+    body{display:block;background:var(--bg);}
+    #stage{padding:0;}
+    #device{width:100%;height:100vh;height:100dvh;border-radius:0;box-shadow:none;}
+  }
+  /* status bar */
+  .statusbar{position:absolute;top:0;left:0;right:0;height:54px;display:flex;align-items:center;
+    justify-content:space-between;padding:16px 30px 0;font-size:15px;font-weight:600;color:#1C1C1E;z-index:5;pointer-events:none;}
+  .statusbar .icons{display:flex;align-items:center;gap:6px;}
+  .app{flex:1;display:flex;flex-direction:column;background:var(--bg);position:relative;overflow:hidden;}
+
+  .hdr{padding:58px 20px 12px;flex-shrink:0;background:var(--bg);position:relative;z-index:2;}
+  .title{font-size:28px;font-weight:700;color:#1C1C1E;letter-spacing:-.3px;}
+  .row-between{display:flex;align-items:center;justify-content:space-between;}
+  .badge{display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:20px;}
+  .badge .dot{width:7px;height:7px;border-radius:50%;}
+  .badge span{font-size:13px;font-weight:600;}
+  .sub{font-size:13px;color:var(--sub);}
+  .back{display:flex;align-items:center;gap:4px;margin-bottom:6px;cursor:pointer;}
+  .back span{color:var(--blue);font-size:17px;}
+
+  .scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 20px 120px;}
+
+  .card{background:#fff;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.04);}
+  .r18{border-radius:18px;}
+  .pad{padding:16px;}
+
+  input,textarea{width:100%;border:none;outline:none;font-size:16px;color:#1C1C1E;background:transparent;font-family:inherit;}
+  textarea{resize:none;line-height:1.45;}
+  input[type=range]{accent-color:var(--blue);}
+
+  .btn{border-radius:18px;padding:14px 16px;text-align:center;font-size:16px;font-weight:600;cursor:pointer;}
+  .btn-primary{background:var(--blue);color:#fff;}
+  .btn-white{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.04);}
+  .note{font-size:13px;color:var(--sub);padding:0 4px 16px;line-height:1.5;}
+
+  .setrow{display:flex;align-items:center;padding:14px 16px;border-bottom:.5px solid var(--sep);cursor:pointer;}
+  .setrow:last-child{border-bottom:none;}
+  .setico{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;margin-right:12px;flex-shrink:0;}
+  .setrow .nm{flex:1;font-size:16px;color:#1C1C1E;}
+  .setrow .vv{font-size:15px;color:var(--sub);margin-right:6px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+  .chip{padding:7px 16px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.04);}
+
+  .toast{position:absolute;bottom:110px;left:50%;transform:translateX(-50%);background:rgba(28,28,30,.92);
+    color:#fff;font-size:14px;padding:10px 18px;border-radius:20px;z-index:40;white-space:nowrap;
+    opacity:0;transition:opacity .2s;pointer-events:none;}
+  .toast.show{opacity:1;}
+
+  .tabbar{position:absolute;bottom:0;left:0;right:0;background:rgba(255,255,255,.92);
+    backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:.5px solid #D1D1D6;
+    display:flex;padding:8px 0 24px;z-index:30;}
+  .tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;}
+  .tab span{font-size:10px;font-weight:600;}
+
+  .toggle{width:51px;height:31px;border-radius:16px;position:relative;cursor:pointer;transition:background .2s;flex-shrink:0;}
+  .knob{position:absolute;top:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.2);transition:left .2s;}
+  .step{width:30px;height:30px;border-radius:8px;background:#F2F2F7;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;color:var(--blue);}
+
+  /* tank animations */
+  @keyframes wl-wave  { from{transform:translateX(0);}   to{transform:translateX(-96px);} }
+  @keyframes wl-wave2 { from{transform:translateX(-96px);} to{transform:translateX(0);} }
+  @keyframes wl-bob   { 0%,100%{transform:translateY(0);} 50%{transform:translateY(2.5px);} }
+  @keyframes wl-bubble{ 0%{transform:translateY(0) scale(.6);opacity:0;} 15%{opacity:.7;} 100%{transform:translateY(-70px) scale(1);opacity:0;} }
+  .bub{position:absolute;border-radius:50%;}
+  @media (prefers-reduced-motion:reduce){ .bub,[style*="wl-"]{animation:none!important;} }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="device">
+    <div class="statusbar">
+      <span id="sb-time">9:41</span>
+      <span class="icons">
+        <svg width="18" height="12" viewBox="0 0 18 12"><rect x="0" y="7" width="3" height="5" rx="1" fill="#1C1C1E"/><rect x="4.5" y="4.5" width="3" height="7.5" rx="1" fill="#1C1C1E"/><rect x="9" y="2" width="3" height="10" rx="1" fill="#1C1C1E"/><rect x="13.5" y="0" width="3" height="12" rx="1" fill="#1C1C1E"/></svg>
+        <svg width="24" height="12" viewBox="0 0 24 12"><rect x="1" y="1" width="20" height="10" rx="3" fill="none" stroke="#1C1C1E" stroke-opacity=".4"/><rect x="2.5" y="2.5" width="15" height="7" rx="1.5" fill="#1C1C1E"/><rect x="22" y="4" width="1.5" height="4" rx="1" fill="#1C1C1E" fill-opacity=".4"/></svg>
+      </span>
+    </div>
+    <div class="app">
+      <div id="hdr" class="hdr"></div>
+      <div id="scroll" class="scroll"></div>
+      <div id="toast" class="toast"></div>
+      <div id="tabbar"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   Water Monitor — real app (standalone PWA)
+   Talks to the ESP32 /api/status + POST endpoints when a device
+   address is configured & reachable (live mode); otherwise runs
+   the built-in simulator (demo mode).
+   ============================================================ */
+
+var LS = window.localStorage;
+
+var C = { blue:'#0A84FF', orange:'#FF9500', red:'#FF3B30', green:'#22C55E', sub:'#8E8E93' };
+
+function fmtNow(){
+  return new Date().toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});
+}
+function esc(s){
+  return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function $(id){ return document.getElementById(id); }
+function clamp(n,a,b){ return Math.max(a,Math.min(b,n)); }
+function pad2(n){ return String(n).padStart(2,'0'); }
+
+/* ---------- application state ---------- */
+var S = {
+  deviceUrl: LS.getItem('wa_device') || '',
+  cloudUrl:  LS.getItem('wa_cloud_url')  || '',
+  cloudUser: LS.getItem('wa_cloud_user') || '',
+  cloudPass: LS.getItem('wa_cloud_pass') || '',
+  deviceId:  LS.getItem('wa_device_id')  || 'wateralarm-1',
+  mode:      LS.getItem('wa_mode') || (LS.getItem('wa_device') ? 'lan' : 'demo'),  // 'lan' | 'cloud' | 'demo'
+  connected: false,
+  _devPick:  null,
+  screen: 'dashboard',
+
+  percent: 62,
+  history: [30,32,35,40,44,50,55,58,60,63,66,70,73,75,74,70,66,60,54,48,44,40,38,36,40,45,50,55,58,60,61,62,62,61,62,62],
+  historyFilter: 'all',
+  simulating: false,
+  simDir: 1,
+  wifiConnected: true,
+  lastUpdate: fmtNow(),
+  log: [
+    { id:3, level:'wifi',   message:'✅ ระบบ Online', time:'07:58' },
+    { id:2, level:'medium', message:'🟡 แจ้งเตือน: ระดับน้ำ ≥ 50% (ปัจจุบัน 58%)', time:'06:40' },
+    { id:1, level:'low',    message:'🔵 แจ้งเตือน: ระดับน้ำต่ำกว่า 25% (ปัจจุบัน 21%)', time:'05:12' },
+  ],
+  nextLogId: 4,
+  currentBand: 2,
+
+  highPct:75, medPct:50, lowPct:25, hystPct:3,
+  msgHigh:'ระดับน้ำสูง', msgMedium:'ระดับน้ำปานกลาง', msgLow:'ระดับน้ำต่ำ กรุณาเติมน้ำ',
+  adcMin:745, adcMax:3723, adc:2591, ma:13.9,
+
+  ssid:'HomeWiFi_5G', wifiPassword:'secret1234',
+  telegramToken:'8648529966:AAEgrg85mQ4kxmNzgy5C9tiesQdENSdCTrw', showToken:false,
+  chatId:'-5181401248',
+  morningEnabled:true, morningHour:8, msgMorning:'ระบบกำลังออนไลน์ปกติ',
+};
+
+/* ============================================================
+   NETWORK LAYER
+   ============================================================ */
+function base(){
+  var u = S.deviceUrl.trim();
+  if(!u) return '';
+  if(!/^https?:\/\//i.test(u)) u = 'http://' + u;
+  return u.replace(/\/+$/,'');
+}
+
+function fetchTimeout(url, opts, ms){
+  opts = opts || {};
+  var ctrl = new AbortController();
+  var t = setTimeout(function(){ ctrl.abort(); }, ms || 4000);
+  opts.signal = ctrl.signal;
+  return fetch(url, opts).finally(function(){ clearTimeout(t); });
+}
+
+function applyStatus(d){
+  // Map ESP32 /api/status JSON onto our state
+  if(typeof d.percent==='number') S.percent = Math.round(d.percent);
+  if(typeof d.band==='number')    S.currentBand = d.band;
+  if(typeof d.wifi==='boolean')   S.wifiConnected = d.wifi;
+  if(d.lastUpdate) S.lastUpdate = d.lastUpdate;
+  ['high:highPct','med:medPct','low:lowPct','hyst:hystPct','adcMin:adcMin','adcMax:adcMax','adc:adc']
+    .forEach(function(p){ var k=p.split(':'); if(typeof d[k[0]]==='number') S[k[1]]=d[k[0]]; });
+  if(typeof d.ma==='number' || typeof d.ma==='string') S.ma = d.ma;
+  if(d.msgHigh!=null)   S.msgHigh   = d.msgHigh;
+  if(d.msgMedium!=null) S.msgMedium = d.msgMedium;
+  if(d.msgLow!=null)    S.msgLow    = d.msgLow;
+  if(d.ssid!=null)      S.ssid      = d.ssid;
+  if(d.token!=null)     S.telegramToken = d.token;
+  if(d.chatId!=null)    S.chatId    = d.chatId;
+  if(typeof d.morningEnabled==='boolean') S.morningEnabled = d.morningEnabled;
+  if(typeof d.morningHour==='number')     S.morningHour   = d.morningHour;
+  if(d.msgMorning!=null) S.msgMorning = d.msgMorning;
+  if(Array.isArray(d.history) && d.history.length) S.history = d.history.slice();
+  if(Array.isArray(d.log)){
+    S.log = d.log.map(function(r,i){ return { id:i, level:r.level, message:r.message, time:r.time }; });
+  }
+}
+
+/* refresh the visible screen from freshly-applied live data (LAN or cloud) */
+function onLiveData(){
+  if(S.screen==='dashboard') updateDashboard();
+  else if(S.screen==='history') render();
+  else if(S.screen==='calib') updateCalibLive();
+  syncBadge();
+}
+
+/* --- LAN (HTTP) polling --- */
+function poll(){
+  if(S.mode!=='lan' || !base()) return Promise.resolve(false);
+  return fetchTimeout(base()+'/api/status', {}, 4000)
+    .then(function(r){ return r.json(); })
+    .then(function(d){ S.connected=true; applyStatus(d); onLiveData(); return true; })
+    .catch(function(){ S.connected=false; syncBadge(); return false; });
+}
+
+/* --- Cloud (MQTT over WebSocket) --- */
+var _mqtt=null;
+function cloudTopics(){ var id=(S.deviceId||'wateralarm-1').trim(); return { status:'water/'+id+'/status', cmd:'water/'+id+'/cmd' }; }
+function mqttDisconnect(){ if(_mqtt){ try{ _mqtt.end(true); }catch(e){} _mqtt=null; } }
+function mqttConnect(){
+  mqttDisconnect();
+  if(typeof mqtt==='undefined'){ toast('โหลดไลบรารี MQTT ไม่ได้'); return; }
+  var url=(S.cloudUrl||'').trim();
+  if(!url){ toast('กรุณากรอกที่อยู่ broker'); return; }
+  var opts={ clientId:'wm-app-'+Math.random().toString(16).slice(2,10), clean:true, reconnectPeriod:3000, connectTimeout:8000 };
+  if(S.cloudUser) opts.username=S.cloudUser;
+  if(S.cloudPass) opts.password=S.cloudPass;
+  var t=cloudTopics();
+  try{ _mqtt=mqtt.connect(url, opts); }
+  catch(e){ toast('ที่อยู่ broker ไม่ถูกต้อง'); return; }
+  _mqtt.on('connect', function(){ S.connected=true; _mqtt.subscribe(t.status); onLiveData(); });
+  _mqtt.on('close',   function(){ S.connected=false; syncBadge(); });
+  _mqtt.on('offline', function(){ S.connected=false; syncBadge(); });
+  _mqtt.on('error',   function(){ S.connected=false; syncBadge(); });
+  _mqtt.on('message', function(topic, payload){
+    if(topic!==t.status) return;
+    try{ var d=JSON.parse(payload.toString()); S.connected=true; applyStatus(d); onLiveData(); }catch(e){}
+  });
+}
+function cloudPublishCmd(action, obj){
+  if(!_mqtt || !_mqtt.connected) return false;
+  _mqtt.publish(cloudTopics().cmd, JSON.stringify(Object.assign({action:action}, obj||{})));
+  return true;
+}
+
+/* --- unified command sender: routes by connection mode --- */
+function postForm(path, obj){
+  var action = path.split('/').pop();               // '/api/thresholds' -> 'thresholds'
+  if(S.mode==='cloud'){
+    var sent = cloudPublishCmd(action, obj);
+    return Promise.resolve(sent ? {ok:true} : {ok:false, error:'ยังไม่เชื่อมต่อคลาวด์'});
+  }
+  if(S.mode!=='lan' || !base()) return Promise.resolve({ok:true, demo:true});
+  var body = new URLSearchParams(obj).toString();
+  return fetchTimeout(base()+path, {
+    method:'POST',
+    headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:body
+  }, 6000).then(function(r){ return r.json(); })
+   .catch(function(){ return {ok:false, error:'เชื่อมต่ออุปกรณ์ไม่ได้'}; });
+}
+
+/* live status-bar clock */
+function tickClock(){ var t=$('sb-time'); if(t) t.textContent = new Date().toLocaleTimeString('th-TH',{hour:'numeric',minute:'2-digit'}); }
+
+/* ============================================================
+   SIMULATOR (demo mode) — mirrors the design logic
+   ============================================================ */
+function decideBand(w, cur){
+  var up   = w>=S.highPct ? 3 : w>=S.medPct ? 2 : w>=S.lowPct ? 1 : 0;
+  var down = w>=S.highPct-S.hystPct ? 3 : w>=S.medPct-S.hystPct ? 2 : w>=S.lowPct-S.hystPct ? 1 : 0;
+  if(up>cur) return up;
+  if(down<cur) return down;
+  return cur;
+}
+function bandMessage(band, w){
+  var cur = ' (ปัจจุบัน '+w+'%)';
+  if(band===3) return { level:'high',   message:'🔴 '+S.msgHigh+cur };
+  if(band===2) return { level:'medium', message:'🟡 '+S.msgMedium+cur };
+  if(band===0) return { level:'low',    message:'🔵 '+S.msgLow+cur };
+  return null;
+}
+function applyPercent(next){
+  next = clamp(Math.round(next),0,100);
+  var newBand = decideBand(next, S.currentBand);
+  var changed = newBand !== S.currentBand;
+  var entry = changed ? bandMessage(newBand, next) : null;
+  if(entry){ S.log = [{ id:S.nextLogId++, level:entry.level, message:entry.message, time:fmtNow() }].concat(S.log); }
+  S.percent = next;
+  S.currentBand = newBand;
+  S.history = S.history.concat(next).slice(-48);
+  S.adc = Math.round(S.adcMin + (next/100)*((S.adcMax-S.adcMin)||1));
+  S.ma  = (4 + (next/100)*16).toFixed(1);
+  S.lastUpdate = fmtNow();
+}
+var _simTimer=null;
+function toggleSimulate(){
+  if(S.simulating){ clearInterval(_simTimer); S.simulating=false; syncSimBtn(); return; }
+  S.simulating=true; syncSimBtn();
+  _simTimer=setInterval(function(){
+    var dir=S.simDir, next=S.percent+dir*2;
+    if(next>=100){ next=100; dir=-1; }
+    if(next<=0){ next=0; dir=1; }
+    S.simDir=dir;
+    applyPercent(next);
+    updateDashboard();
+  },200);
+}
+function stopSim(){ if(S.simulating){ clearInterval(_simTimer); S.simulating=false; } }
+
+/* ============================================================
+   TOAST
+   ============================================================ */
+var _toastTimer=null;
+function toast(msg){
+  var t=$('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer=setTimeout(function(){ t.classList.remove('show'); },1600);
+}
+
+/* ============================================================
+   DERIVED VIEW VALUES
+   ============================================================ */
+function derive(){
+  var band=S.currentBand, p=Math.round(S.percent);
+  var statusColor=C.blue, statusLabel='ปกติ';
+  if(band===0){ statusColor=C.red;    statusLabel='น้ำน้อย'; }
+  else if(band===3){ statusColor=C.green;  statusLabel='เต็ม'; }
+  else if(band===2){ statusColor=C.orange; statusLabel='ระดับกลาง'; }
+  var low=band===0;
+  return {
+    band:band, p:p, statusColor:statusColor, statusLabel:statusLabel, low:low,
+    tankTop: low?'#FF6961':'#5AC8FA', tankBot: low?'#FF3B30':'#0A84FF',
+    h: band===3, m: band===2, l: band===0
+  };
+}
+
+/* ============================================================
+   REUSABLE MARKUP
+   ============================================================ */
+function chevron(){ return '<svg width="7" height="12" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6" stroke="#C7C7CC" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>'; }
+
+function waveMarkup(){
+  return ''
+   +'<div style="position:absolute;top:-8px;left:0;right:0;height:14px;animation:wl-bob 3s ease-in-out infinite;">'
+     +'<svg width="192" height="20" viewBox="0 0 192 20" preserveAspectRatio="none" style="position:absolute;top:0;left:0;animation:wl-wave2 4.2s linear infinite;opacity:.28"><path d="M0 8 Q12 2 24 8 T48 8 T72 8 T96 8 T120 8 T144 8 T168 8 T192 8 V20 H0 Z" fill="#fff"></path></svg>'
+     +'<svg width="192" height="20" viewBox="0 0 192 20" preserveAspectRatio="none" style="position:absolute;top:1px;left:0;animation:wl-wave 2.6s linear infinite;opacity:.45"><path d="M0 8 Q12 14 24 8 T48 8 T72 8 T96 8 T120 8 T144 8 T168 8 T192 8 V20 H0 Z" fill="#fff"></path></svg>'
+   +'</div>'
+   +'<div class="bub" style="bottom:8px;left:22px;width:5px;height:5px;background:rgba(255,255,255,.55);animation:wl-bubble 3.4s ease-in infinite"></div>'
+   +'<div class="bub" style="bottom:4px;left:52px;width:3px;height:3px;background:rgba(255,255,255,.5);animation:wl-bubble 2.8s ease-in infinite 1.1s"></div>'
+   +'<div class="bub" style="bottom:6px;left:68px;width:4px;height:4px;background:rgba(255,255,255,.5);animation:wl-bubble 3.9s ease-in infinite .6s"></div>';
+}
+
+function chartSVG(){
+  var hist = (S.history&&S.history.length)?S.history:[Math.round(S.percent)];
+  var W=320,H=150,padT=12,padB=12,plotH=H-padT-padB,n=hist.length;
+  function xAt(i){ return n<=1?0:(i/(n-1))*W; }
+  function yAt(v){ return padT+(1-v/100)*plotH; }
+  var d=derive();
+  var pts=hist.map(function(v,i){ return xAt(i).toFixed(1)+','+yAt(v).toFixed(1); }).join(' ');
+  var area='M0,'+H+' '+hist.map(function(v,i){ return 'L'+xAt(i).toFixed(1)+','+yAt(v).toFixed(1); }).join(' ')+' L'+W+','+H+' Z';
+  var lx=xAt(n-1).toFixed(1), ly=yAt(hist[n-1]).toFixed(1);
+  var fill=d.low?'rgba(255,59,48,.12)':'rgba(10,132,255,.12)';
+  function ln(v,c){ return '<line x1="0" y1="'+yAt(v).toFixed(1)+'" x2="320" y2="'+yAt(v).toFixed(1)+'" stroke="'+c+'" stroke-width="1" stroke-dasharray="3 4" opacity=".4" vector-effect="non-scaling-stroke"></line>'; }
+  return '<svg width="100%" height="150" viewBox="0 0 320 150" preserveAspectRatio="none" style="display:block;overflow:visible">'
+    +ln(S.highPct,'#0A84FF')+ln(S.medPct,'#FF9500')+ln(S.lowPct,'#FF3B30')
+    +'<path d="'+area+'" fill="'+fill+'"></path>'
+    +'<polyline points="'+pts+'" fill="none" stroke="'+d.statusColor+'" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>'
+    +'<circle cx="'+lx+'" cy="'+ly+'" r="4" fill="'+d.statusColor+'" stroke="#fff" stroke-width="2"></circle></svg>';
+}
+
+function sensorRowsHTML(){
+  var d=derive();
+  function row(lab,active,col,onText){
+    return '<div class="card" style="padding:12px 14px;display:flex;align-items:center;justify-content:space-between;">'
+      +'<div><div style="font-size:14px;font-weight:600;color:#1C1C1E;">'+lab+'</div>'
+      +'<div style="font-size:11px;color:#8E8E93;">'+(active?onText:'ปกติ')+'</div></div>'
+      +'<div style="width:12px;height:12px;border-radius:50%;background:'+(active?col:'#D1D1D6')+';box-shadow:0 0 0 4px '+(active?col+'22':'transparent')+';"></div></div>';
+  }
+  var h = row('High '+S.highPct+'%', d.h, '#0A84FF','ทำงานอยู่')
+        + row('Medium '+S.medPct+'%', d.m, '#FF9500','ทำงานอยู่')
+        + row('Low '+S.lowPct+'%', d.l, '#FF3B30','แจ้งเตือน!');
+  if(d.low){
+    h += '<div style="background:#FDEBEA;border:1px solid #F5B5B0;border-radius:14px;padding:12px 14px;display:flex;gap:10px;align-items:flex-start;">'
+      +'<span style="font-size:18px;width:37px;height:30px">⚠️</span>'
+      +'<div style="font-size:13px;color:#B3261E;line-height:1.4;">'+esc(S.msgLow)+'</div></div>';
+  }
+  return h;
+}
+
+/* ============================================================
+   HEADER
+   ============================================================ */
+function renderHeader(){
+  var titles={ dashboard:'ระบบตรวจสอบน้ำ', history:'ประวัติการแจ้งเตือน', settings:'ตั้งค่า',
+    device:'อุปกรณ์', wifi:'Wi-Fi', telegram:'Telegram', thresholds:'เกณฑ์แจ้งเตือน',
+    messages:'ข้อความแจ้งเตือน', morning:'รายงานเช้า', calib:'ตั้งค่าเซนเซอร์ ADC' };
+  var subScreens=['device','wifi','telegram','thresholds','messages','morning','calib'];
+  var isSub=subScreens.indexOf(S.screen)>=0;
+  var h='';
+  if(isSub){
+    h+='<div class="back" onclick="nav(\'settings\')"><svg width="11" height="18" viewBox="0 0 11 18"><path d="M9 1L1.5 9 9 17" stroke="#0A84FF" stroke-width="2.3" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg><span>ตั้งค่า</span></div>';
+  }
+  h+='<div class="row-between"><div class="title">'+esc(titles[S.screen])+'</div>';
+  if(S.screen==='dashboard') h+='<div id="d_badge"></div>';
+  h+='</div>';
+  if(S.screen==='dashboard') h+='<div id="d_upd" class="sub" style="margin-top:2px;"></div>';
+  $('hdr').innerHTML=h;
+  if(S.screen==='dashboard'){ syncBadge(); $('d_upd').textContent='อัปเดตล่าสุด '+S.lastUpdate; }
+}
+
+function badgeHTML(){
+  if(S.mode==='demo'){
+    return '<div class="badge" style="background:#EAF0FF;"><span class="dot" style="background:#0A84FF;"></span><span style="color:#0A5BBF;">ทดลอง</span></div>';
+  }
+  var on = S.connected && S.wifiConnected;
+  var bg = on?'#E7F8EE':'#FDEBEA', dot=on?'#22C55E':'#FF3B30', tc=on?'#1C8A4C':'#B3261E';
+  var label = !S.connected ? 'ออฟไลน์' : (S.wifiConnected?'ออนไลน์':'อุปกรณ์ไม่มีเน็ต');
+  return '<div class="badge" style="background:'+bg+';"><span class="dot" style="background:'+dot+';"></span><span style="color:'+tc+';">'+label+'</span></div>';
+}
+function syncBadge(){ var b=$('d_badge'); if(b) b.innerHTML=badgeHTML(); var u=$('d_upd'); if(u) u.textContent='อัปเดตล่าสุด '+S.lastUpdate; }
+
+/* ============================================================
+   SCREENS
+   ============================================================ */
+function viewDashboard(){
+  var d=derive();
+  var h='<div style="display:flex;gap:16px;">';
+  // Tank
+  h+='<div class="card" style="padding:20px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;">'
+    +'<div style="position:relative;width:96px;height:170px;">'
+      +'<div style="position:absolute;inset:0;border:3px solid #D1D1D6;border-radius:14px;overflow:hidden;background:#FAFAFA;">'
+        +'<div id="d_fill" style="position:absolute;bottom:0;left:0;right:0;height:'+d.p+'%;background:linear-gradient(180deg,'+d.tankTop+','+d.tankBot+');transition:height .4s ease;overflow:visible;">'+waveMarkup()+'</div>'
+      +'</div>'
+      +'<div id="d_mk_high" class="mk" style="position:absolute;left:-2px;right:-2px;top:'+(100-S.highPct)+'%;height:1px;background:repeating-linear-gradient(90deg,#C7C7CC 0 4px,transparent 4px 8px);"></div>'
+      +'<div id="d_mk_med"  class="mk" style="position:absolute;left:-2px;right:-2px;top:'+(100-S.medPct)+'%;height:1px;background:repeating-linear-gradient(90deg,#C7C7CC 0 4px,transparent 4px 8px);"></div>'
+      +'<div id="d_mk_low"  class="mk" style="position:absolute;left:-2px;right:-2px;top:'+(100-S.lowPct)+'%;height:1px;background:repeating-linear-gradient(90deg,#C7C7CC 0 4px,transparent 4px 8px);"></div>'
+    +'</div>'
+    +'<div id="d_pct" style="font-size:30px;font-weight:700;color:#1C1C1E;margin-top:14px;">'+d.p+'%</div>'
+    +'<div id="d_status" style="font-size:13px;font-weight:600;color:'+d.statusColor+';margin-top:2px;">'+d.statusLabel+'</div>'
+  +'</div>';
+  // Sensor rows
+  h+='<div id="d_rows" style="flex:1;display:flex;flex-direction:column;gap:10px;">'+sensorRowsHTML()+'</div>';
+  h+='</div>';
+
+  // Trend graph
+  h+='<div class="card pad" style="margin-top:16px;">'
+    +'<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;"><div style="font-size:14px;font-weight:600;color:#1C1C1E;">แนวโน้มระดับน้ำ</div><div style="font-size:12px;color:#8E8E93;">ย้อนหลัง ~2 นาที</div></div>'
+    +'<div style="display:flex;">'
+      +'<div style="width:26px;height:150px;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;padding:7px 0;flex-shrink:0;">'
+        +'<span style="font-size:10px;color:#B0B0B5;line-height:1;">100</span><span style="font-size:10px;color:#B0B0B5;line-height:1;">75</span><span style="font-size:10px;color:#B0B0B5;line-height:1;">50</span><span style="font-size:10px;color:#B0B0B5;line-height:1;">25</span><span style="font-size:10px;color:#B0B0B5;line-height:1;">0</span></div>'
+      +'<div style="width:14px;height:150px;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="font-size:10px;color:#8E8E93;transform:rotate(-90deg);white-space:nowrap;">ระดับน้ำ %</span></div>'
+      +'<div id="d_chart" style="flex:1;position:relative;height:150px;">'+chartSVG()+'</div>'
+    +'</div>'
+    +'<div style="display:flex;justify-content:space-between;margin-left:40px;margin-top:7px;"><span style="font-size:10px;color:#B0B0B5;">2 นาทีก่อน</span><span style="font-size:10px;color:#B0B0B5;">1 นาทีก่อน</span><span style="font-size:10px;color:#B0B0B5;">ตอนนี้</span></div>'
+    +'<div style="text-align:center;font-size:10px;color:#8E8E93;margin-top:2px;margin-left:40px;">เวลา</div>'
+    +'<div style="display:flex;gap:16px;margin-top:12px;padding-top:12px;border-top:.5px solid #F0F0F0;">'
+      +'<div style="display:flex;align-items:center;gap:5px;"><div style="width:12px;height:2px;background:#0A84FF;"></div><span style="font-size:11px;color:#8E8E93;">สูง '+S.highPct+'%</span></div>'
+      +'<div style="display:flex;align-items:center;gap:5px;"><div style="width:12px;height:2px;background:#FF9500;"></div><span style="font-size:11px;color:#8E8E93;">กลาง '+S.medPct+'%</span></div>'
+      +'<div style="display:flex;align-items:center;gap:5px;"><div style="width:12px;height:2px;background:#FF3B30;"></div><span style="font-size:11px;color:#8E8E93;">ต่ำ '+S.lowPct+'%</span></div>'
+    +'</div>'
+  +'</div>';
+
+  // Simulator card — demo mode only
+  if(S.mode==='demo'){
+    h+='<div class="card pad" style="margin-top:16px;">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">'
+        +'<div style="font-size:14px;font-weight:600;color:#1C1C1E;">จำลองระดับน้ำ (Real-time demo)</div>'
+        +'<div id="d_simbtn" onclick="toggleSimulate()" style="width:40px;height:40px;border-radius:20px;background:'+(S.simulating?'#FF3B30':'#0A84FF')+';display:flex;align-items:center;justify-content:center;cursor:pointer;">'+simIcon()+'</div>'
+      +'</div>'
+      +'<input id="d_slider" type="range" min="0" max="100" value="'+S.percent+'" oninput="onSlider(this.value)" style="width:100%;">'
+    +'</div>';
+  } else {
+    h+='<div class="card pad" style="margin-top:16px;display:flex;align-items:center;gap:12px;">'
+      +'<div style="width:34px;height:34px;border-radius:9px;background:#EAF0FF;display:flex;align-items:center;justify-content:center;flex-shrink:0;">📡</div>'
+      +'<div style="flex:1;"><div style="font-size:14px;font-weight:600;color:#1C1C1E;">'+(S.connected?(S.mode==='cloud'?'รับข้อมูลสดผ่านคลาวด์':'รับข้อมูลสดจากอุปกรณ์'):'กำลังเชื่อมต่อ…')+'</div>'
+      +'<div style="font-size:12px;color:#8E8E93;">'+esc(S.mode==='cloud'?('คลาวด์ · '+S.deviceId):(base()||'ยังไม่ตั้งค่าที่อยู่'))+'</div></div>'
+      +'<div onclick="nav(\'device\')" style="font-size:14px;color:#0A84FF;font-weight:600;cursor:pointer;">ตั้งค่า</div>'
+    +'</div>';
+  }
+  return h;
+}
+function simIcon(){
+  return S.simulating
+    ? '<svg width="14" height="14" viewBox="0 0 14 14"><rect x="1" y="1" width="4" height="12" rx="1" fill="#fff"></rect><rect x="9" y="1" width="4" height="12" rx="1" fill="#fff"></rect></svg>'
+    : '<svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 1l11 6-11 6V1z" fill="#fff"></path></svg>';
+}
+function syncSimBtn(){ var b=$('d_simbtn'); if(b){ b.style.background=S.simulating?'#FF3B30':'#0A84FF'; b.innerHTML=simIcon(); } }
+
+/* live-patch dashboard without rebuilding the animated tank */
+function updateDashboard(){
+  if(S.screen!=='dashboard') return;
+  var d=derive();
+  var fill=$('d_fill'); if(fill){ fill.style.height=d.p+'%'; fill.style.background='linear-gradient(180deg,'+d.tankTop+','+d.tankBot+')'; }
+  var pct=$('d_pct'); if(pct) pct.textContent=d.p+'%';
+  var st=$('d_status'); if(st){ st.textContent=d.statusLabel; st.style.color=d.statusColor; }
+  var mkh=$('d_mk_high'); if(mkh) mkh.style.top=(100-S.highPct)+'%';
+  var mkm=$('d_mk_med');  if(mkm) mkm.style.top=(100-S.medPct)+'%';
+  var mkl=$('d_mk_low');  if(mkl) mkl.style.top=(100-S.lowPct)+'%';
+  var rows=$('d_rows'); if(rows) rows.innerHTML=sensorRowsHTML();
+  var ch=$('d_chart'); if(ch) ch.innerHTML=chartSVG();
+  var sl=$('d_slider'); if(sl && document.activeElement!==sl) sl.value=S.percent;
+  syncBadge();
+}
+
+/* ---- History ---- */
+var META={ high:{l:'ระดับสูง',c:'#0A84FF',i:'▲'}, medium:{l:'ระดับกลาง',c:'#FF9500',i:'●'}, low:{l:'ระดับต่ำ',c:'#FF3B30',i:'▼'}, wifi:{l:'ระบบ',c:'#34C759',i:'✓'} };
+function isAlert(lv){ return lv==='high'||lv==='medium'||lv==='low'; }
+function viewHistory(){
+  var f=S.historyFilter;
+  var rows=S.log.filter(function(r){ return f==='all'?true : f==='alert'?isAlert(r.level) : !isAlert(r.level); });
+  function chip(k,lab){ var on=f===k; return '<div class="chip" style="background:'+(on?'#1C1C1E':'#fff')+';color:'+(on?'#fff':'#8E8E93')+';" onclick="setFilter(\''+k+'\')">'+lab+'</div>'; }
+  var h='<div style="display:flex;gap:8px;margin-bottom:18px;">'+chip('all','ทั้งหมด')+chip('alert','แจ้งเตือน')+chip('system','ระบบ')+'</div>';
+  if(rows.length===0){
+    h+='<div style="text-align:center;padding:60px 20px;color:#8E8E93;"><div style="font-size:32px;margin-bottom:8px;">📋</div><div style="font-size:15px;">ไม่มีรายการในหมวดนี้</div></div>';
+    return h;
+  }
+  h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:0 4px;margin-bottom:10px;"><div style="font-size:13px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.3px;">วันนี้</div><div style="font-size:12px;color:#8E8E93;">'+rows.length+' รายการ</div></div>';
+  h+='<div class="card" style="border-radius:18px;padding:16px 16px 4px;">';
+  rows.forEach(function(r,i){
+    var m=META[r.level]||META.wifi, last=i===rows.length-1;
+    h+='<div style="display:flex;gap:12px;">'
+      +'<div style="display:flex;flex-direction:column;align-items:center;">'
+        +'<div style="width:30px;height:30px;border-radius:50%;background:'+m.c+'1A;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:12px;color:'+m.c+';">'+m.i+'</div>'
+        +'<div style="flex:1;width:2px;background:'+(last?'transparent':'#E5E5EA')+';margin:3px 0;"></div></div>'
+      +'<div style="flex:1;min-width:0;padding-bottom:16px;">'
+        +'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;"><span style="font-size:13px;font-weight:700;color:'+m.c+';">'+m.l+'</span><span style="font-size:12px;color:#8E8E93;flex-shrink:0;">'+esc(r.time)+'</span></div>'
+        +'<div style="font-size:13px;color:#3A3A3C;margin-top:3px;line-height:1.45;">'+esc(r.message)+'</div></div></div>';
+  });
+  h+='</div>';
+  return h;
+}
+function setFilter(k){ S.historyFilter=k; render(); }
+
+/* ---- Settings root ---- */
+function viewSettings(){
+  function row(icoBg, ico, name, val, scr){
+    return '<div class="setrow" onclick="nav(\''+scr+'\')"><div class="setico" style="background:'+icoBg+';">'+ico+'</div>'
+      +'<div class="nm">'+name+'</div>'+(val?'<div class="vv">'+esc(val)+'</div>':'')+chevron()+'</div>';
+  }
+  var devVal = S.mode==='demo' ? 'โหมดทดลอง' : (S.connected ? (S.mode==='cloud'?'คลาวด์':'Wi-Fi บ้าน') : 'ออฟไลน์');
+  var h='<div class="card" style="border-radius:18px;overflow:hidden;">';
+  h+=row('#30B0C7','📡','อุปกรณ์', devVal, 'device');
+  h+=row('#0A84FF','<svg width="16" height="12" viewBox="0 0 17 12"><path d="M8.5 3.2C10.8 3.2 12.9 4.1 14.4 5.6L15.5 4.5C13.7 2.7 11.2 1.5 8.5 1.5C5.8 1.5 3.3 2.7 1.5 4.5L2.6 5.6C4.1 4.1 6.2 3.2 8.5 3.2Z" fill="#fff"/><circle cx="8.5" cy="10.5" r="1.5" fill="#fff"/></svg>','Wi-Fi', S.ssid||'-', 'wifi');
+  h+=row('#229ED9','<svg width="15" height="15" viewBox="0 0 240 240"><path d="M100 170l-4-60 110-70-130 55-45-15z" fill="#fff" transform="scale(0.7) translate(30,20)"/></svg>','Telegram','', 'telegram');
+  h+=row('#FF9500','<svg width="15" height="15" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="9" cy="7" r="2.4" fill="#FF9500" stroke="#fff" stroke-width="1.6"/><circle cx="15" cy="17" r="2.4" fill="#FF9500" stroke="#fff" stroke-width="1.6"/></svg>','เกณฑ์แจ้งเตือน', S.lowPct+'/'+S.medPct+'/'+S.highPct+'%', 'thresholds');
+  h+=row('#34C759','<svg width="15" height="15" viewBox="0 0 24 24"><path d="M4 4h16v12H7l-3 3V4z" fill="#fff"/></svg>','ข้อความแจ้งเตือน','', 'messages');
+  h+=row('#FFCC00','<svg width="15" height="15" viewBox="0 0 24 24"><circle cx="12" cy="14" r="7" fill="#fff"/><path d="M9 2h6M12 6V2M4 6l2 2M20 6l-2 2" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>','รายงานเช้า', pad2(S.morningHour)+':00', 'morning');
+  h+=row('#5856D6','<svg width="15" height="15" viewBox="0 0 24 24"><path d="M4 18h16M4 18V6m0 12l5-6 4 3 5-7" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>','ตั้งค่าเซนเซอร์ ADC', '4–20mA', 'calib');
+  h+='</div>';
+  return h;
+}
+
+/* ---- Device connection (Cloud / Wi-Fi / Demo) ---- */
+function viewDevice(){
+  var m = S._devPick || S.mode;   // draft selection for the form
+  function seg(k,label){
+    var on=m===k;
+    return '<div onclick="setDevMode(\''+k+'\')" style="flex:1;text-align:center;padding:8px 0;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;background:'+(on?'#fff':'transparent')+';color:'+(on?'#0A84FF':'#8E8E93')+';box-shadow:'+(on?'0 1px 2px rgba(0,0,0,.12)':'none')+';">'+label+'</div>';
+  }
+  var statusColor = S.mode==='demo' ? '#0A84FF' : (S.connected?'#22C55E':'#FF3B30');
+  var statusText  = S.mode==='demo' ? 'โหมดทดลอง' : (S.connected? (S.mode==='cloud'?'เชื่อมต่อคลาวด์แล้ว':'เชื่อมต่อแล้ว') : 'ยังไม่เชื่อมต่อ');
+  var h='<div style="display:flex;gap:4px;background:#E9E9EB;border-radius:11px;padding:3px;margin-bottom:16px;">'+seg('cloud','คลาวด์')+seg('lan','Wi-Fi บ้าน')+seg('demo','ทดลอง')+'</div>';
+  h+='<div class="card pad r18" style="margin-bottom:16px;"><div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;"><span class="sub">สถานะปัจจุบัน</span><span style="font-size:15px;font-weight:600;color:'+statusColor+';">'+statusText+'</span></div></div>';
+
+  if(m==='cloud'){
+    h+='<div class="card r18" style="padding:4px 16px;margin-bottom:12px;">'
+      +'<div style="padding:12px 0;border-bottom:.5px solid #E5E5EA;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">Broker URL (WebSocket)</div><input id="cl_url" value="'+esc(S.cloudUrl)+'" placeholder="wss://xxxx.hivemq.cloud:8884/mqtt" style="font-family:monospace;font-size:14px;"></div>'
+      +'<div style="padding:12px 0;border-bottom:.5px solid #E5E5EA;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">Device ID</div><input id="cl_id" value="'+esc(S.deviceId)+'" style="font-family:monospace;"></div>'
+      +'<div style="padding:12px 0;border-bottom:.5px solid #E5E5EA;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">Username</div><input id="cl_user" value="'+esc(S.cloudUser)+'" autocomplete="off" style="font-family:monospace;"></div>'
+      +'<div style="padding:12px 0;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">Password</div><input id="cl_pass" type="password" value="'+esc(S.cloudPass)+'" autocomplete="off" style="font-family:monospace;"></div>'
+    +'</div>';
+    h+='<div class="note">ใช้ MQTT over WebSocket (WSS) ของ cloud broker เช่น HiveMQ Cloud (มีแพ็กเกจฟรี) แอปและ ESP32 ต้องตั้ง <b>Device ID</b> เดียวกัน จากนั้นใช้งานได้จากทุกที่ที่มีอินเทอร์เน็ต ไม่ต้องเปิด port บนเราเตอร์</div>';
+    h+='<div class="btn btn-primary" onclick="connectCloud()">เชื่อมต่อคลาวด์</div>';
+  } else if(m==='lan'){
+    h+='<div class="card pad r18" style="margin-bottom:12px;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">ที่อยู่อุปกรณ์ (IP หรือ hostname)</div><input id="dev_addr" value="'+esc(S.deviceUrl)+'" placeholder="192.168.1.50" style="font-family:monospace;"></div>';
+    h+='<div class="note">โทรศัพท์ต้องอยู่ Wi-Fi วงเดียวกับ ESP32 ดูที่อยู่ IP จาก Serial Monitor หรือข้อความ Telegram ตอนบูต (เช่น http://192.168.1.50)</div>';
+    h+='<div class="btn btn-primary" onclick="connectDevice()">เชื่อมต่อ</div>';
+  } else {
+    h+='<div class="note">โหมดทดลองจำลองข้อมูลในเครื่อง ไม่ต่อกับอุปกรณ์จริง เหมาะกับการลองใช้งานหน้าจอต่าง ๆ</div>';
+    h+='<div class="btn btn-primary" onclick="useDemo()">ใช้โหมดทดลอง</div>';
+  }
+  return h;
+}
+function setDevMode(k){ S._devPick=k; render(); }
+function connectDevice(){
+  var v=$('dev_addr').value.trim();
+  if(!v){ toast('กรุณากรอกที่อยู่อุปกรณ์'); return; }
+  mqttDisconnect();
+  S.deviceUrl=v; LS.setItem('wa_device',v);
+  S.mode='lan'; LS.setItem('wa_mode','lan'); S._devPick=null; S.connected=false; stopSim();
+  toast('กำลังเชื่อมต่อ…');
+  poll().then(function(ok){
+    if(ok){ toast('เชื่อมต่ออุปกรณ์สำเร็จ ✓'); nav('dashboard'); }
+    else { toast('เชื่อมต่อไม่ได้ ตรวจสอบที่อยู่/เครือข่าย'); }
+  });
+}
+function connectCloud(){
+  var url=$('cl_url').value.trim(), id=($('cl_id').value.trim()||'wateralarm-1');
+  var user=$('cl_user').value.trim(), pass=$('cl_pass').value;
+  if(!url){ toast('กรุณากรอก Broker URL'); return; }
+  S.cloudUrl=url; S.cloudUser=user; S.cloudPass=pass; S.deviceId=id;
+  LS.setItem('wa_cloud_url',url); LS.setItem('wa_cloud_user',user); LS.setItem('wa_cloud_pass',pass); LS.setItem('wa_device_id',id);
+  S.mode='cloud'; LS.setItem('wa_mode','cloud'); S._devPick=null; S.connected=false; stopSim();
+  toast('กำลังเชื่อมต่อคลาวด์…');
+  mqttConnect();
+  nav('dashboard');
+}
+function useDemo(){
+  mqttDisconnect();
+  S.mode='demo'; LS.setItem('wa_mode','demo'); S.connected=false; S._devPick=null;
+  toast('เข้าสู่โหมดทดลอง'); nav('dashboard');
+}
+
+/* ---- Wi-Fi ---- */
+function viewWifi(){
+  var connected = S.mode==='demo' ? S.wifiConnected : (S.connected && S.wifiConnected);
+  var h='<div class="card pad r18" style="margin-bottom:16px;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:.5px solid #E5E5EA;"><span class="sub">สถานะ</span><span style="font-size:15px;font-weight:600;color:'+(connected?'#22C55E':'#FF3B30')+';">'+(connected?'เชื่อมต่อแล้ว':'ไม่ได้เชื่อมต่อ')+'</span></div>'
+    +'<div style="padding:12px 0;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">ชื่อเครือข่าย (SSID)</div><div style="font-size:16px;color:#1C1C1E;">'+esc(S.ssid||'-')+'</div></div>'
+  +'</div>';
+  h+='<div class="note">การเชื่อมต่อ Wi-Fi ของอุปกรณ์ตั้งค่าผ่าน Captive Portal (WiFiManager) หากต้องการเปลี่ยนเครือข่าย กดปุ่มด้านล่างเพื่อรีเซ็ต อุปกรณ์จะเปิด AP ชื่อ “WaterLevel_Setup” ให้ตั้งค่าใหม่</div>';
+  h+='<div class="btn btn-white" style="color:#FF3B30;" onclick="forgetWifi()">ลืมเครือข่ายนี้ / รีเซ็ต Wi-Fi</div>';
+  return h;
+}
+function forgetWifi(){
+  if(S.mode!=='demo'){
+    if(!confirm('รีเซ็ต Wi-Fi และรีสตาร์ทอุปกรณ์?')) return;
+    postForm('/api/forget',{}).then(function(){ toast('กำลังรีสตาร์ทอุปกรณ์…'); });
+  } else {
+    S.wifiConnected=false; S.ssid=''; toast('ลืมเครือข่ายแล้ว'); render();
+  }
+}
+
+/* ---- Telegram ---- */
+function viewTelegram(){
+  var tokenShown = S.showToken ? S.telegramToken : (S.telegramToken||'').replace(/./g,'•').slice(0,20);
+  var h='<div class="card pad r18" style="margin-bottom:16px;">'
+    +'<div style="padding:12px 0;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">Bot Token</div>'
+      +'<div style="display:flex;align-items:center;gap:8px;"><input id="tg_token" type="text" value="'+esc(tokenShown)+'" onchange="onTokenEdit(this.value)" style="flex:1;font-family:monospace;font-size:15px;">'
+      +'<span onclick="toggleToken()" style="font-size:13px;color:#0A84FF;cursor:pointer;flex-shrink:0;">'+(S.showToken?'ซ่อน':'แสดง')+'</span></div></div>'
+    +'<div style="padding:12px 0;border-top:.5px solid #E5E5EA;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">Chat ID</div><input id="tg_chat" value="'+esc(S.chatId)+'" style="font-family:monospace;"></div>'
+  +'</div>';
+  h+='<div class="btn btn-white" style="color:#229ED9;margin-bottom:12px;" onclick="testTelegram()">ส่งข้อความทดสอบ</div>';
+  h+='<div class="btn btn-primary" onclick="saveTelegram()">บันทึก</div>';
+  return h;
+}
+function toggleToken(){ if($('tg_token')&&S.showToken) S.telegramToken=$('tg_token').value; S.showToken=!S.showToken; render(); }
+function onTokenEdit(v){ if(S.showToken) S.telegramToken=v; }
+function saveTelegram(){
+  if(S.showToken) S.telegramToken=$('tg_token').value;
+  S.chatId=$('tg_chat').value;
+  postForm('/api/telegram',{token:S.telegramToken, chatId:S.chatId}).then(function(r){
+    toast(r.ok?'บันทึกแล้ว ✓':(r.error||'ผิดพลาด'));
+  });
+}
+function testTelegram(){
+  toast('กำลังส่ง…');
+  if(S.mode==='demo'){
+    S.log=[{ id:S.nextLogId++, level:'wifi', message:'📩 ทดสอบส่งข้อความสำเร็จ', time:fmtNow() }].concat(S.log);
+    toast('ส่งข้อความทดสอบสำเร็จ ✓'); return;
+  }
+  postForm('/api/test',{}).then(function(r){ toast(r.ok?'ส่งข้อความทดสอบสำเร็จ ✓':(r.error||'ส่งไม่สำเร็จ')); });
+}
+
+/* ---- Thresholds ---- */
+function viewThresholds(){
+  function nr(dot,name,id,val){
+    return '<div style="display:flex;align-items:center;padding:14px 0;border-bottom:.5px solid #E5E5EA;">'
+      +'<div style="width:10px;height:10px;border-radius:50%;background:'+dot+';margin-right:10px;"></div>'
+      +'<div style="flex:1;font-size:16px;color:#1C1C1E;">'+name+'</div>'
+      +'<input type="number" id="'+id+'" value="'+val+'" style="width:64px;text-align:right;font-size:17px;font-weight:600;"><span style="font-size:16px;color:#8E8E93;margin-left:2px;">%</span></div>';
+  }
+  var h='<div class="card pad r18" style="margin-bottom:12px;">'
+    +nr('#0A84FF','ระดับสูง (High)','t_high',S.highPct)
+    +nr('#FF9500','ระดับกลาง (Medium)','t_med',S.medPct)
+    +nr('#FF3B30','ระดับต่ำ (Low)','t_low',S.lowPct)+'</div>';
+  h+='<div class="card pad r18" style="margin-bottom:12px;"><div style="display:flex;align-items:center;padding:14px 0;"><div style="flex:1;"><div style="font-size:16px;color:#1C1C1E;">ระยะกันสั่น (Hysteresis)</div><div style="font-size:12px;color:#8E8E93;margin-top:2px;">กันแจ้งเตือนซ้ำเมื่อค่าแกว่งที่ขอบเกณฑ์</div></div><input type="number" id="t_hyst" value="'+S.hystPct+'" style="width:56px;text-align:right;font-size:17px;font-weight:600;"><span style="font-size:16px;color:#8E8E93;margin-left:2px;">%</span></div></div>';
+  h+='<div class="note">เงื่อนไข: ต่ำ &lt; กลาง &lt; สูง (0–100%) ระบบจะแจ้งเตือนเฉพาะเมื่อ<b>เปลี่ยนระดับ</b>เท่านั้น</div>';
+  h+='<div class="btn btn-primary" onclick="saveThresholds()">บันทึก</div>';
+  return h;
+}
+function saveThresholds(){
+  var high=+$('t_high').value, med=+$('t_med').value, low=+$('t_low').value, hyst=+$('t_hyst').value;
+  if(!(low>=0 && low<med && med<high && high<=100 && hyst>=0 && hyst<=20)){ toast('ค่าไม่ถูกต้อง: ต่ำ < กลาง < สูง (0–100)'); return; }
+  postForm('/api/thresholds',{high:high, med:med, low:low, hyst:hyst}).then(function(r){
+    if(r.ok){ S.highPct=high; S.medPct=med; S.lowPct=low; S.hystPct=hyst; S.currentBand=decideBand(S.percent,1); toast('บันทึกเกณฑ์แล้ว ✓'); }
+    else toast(r.error||'ค่าไม่ถูกต้อง');
+  });
+}
+
+/* ---- Messages ---- */
+function viewMessages(){
+  function box(col,title,id,val){
+    return '<div class="card pad" style="border-radius:16px;"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><div style="width:10px;height:10px;border-radius:50%;background:'+col+';"></div><div style="font-size:13px;font-weight:700;color:'+col+';">'+title+'</div></div><textarea id="'+id+'" rows="2">'+esc(val)+'</textarea></div>';
+  }
+  var h='<div class="note">ตั้งข้อความที่จะส่งเมื่อระดับน้ำเข้าสู่แต่ละช่วง ระบบจะต่อท้ายด้วยค่าเปอร์เซ็นต์ปัจจุบันอัตโนมัติ</div>';
+  h+='<div style="display:flex;flex-direction:column;gap:14px;">'
+    +box('#0A84FF','ระดับสูง (≥ '+S.highPct+'%)','m_high',S.msgHigh)
+    +box('#FF9500','ระดับกลาง (≥ '+S.medPct+'%)','m_med',S.msgMedium)
+    +box('#FF3B30','ระดับต่ำ (&lt; '+S.lowPct+'%)','m_low',S.msgLow)
+  +'</div>';
+  h+='<div class="btn btn-primary" style="margin-top:16px;" onclick="saveMessages()">บันทึก</div>';
+  return h;
+}
+function saveMessages(){
+  var high=$('m_high').value, med=$('m_med').value, low=$('m_low').value;
+  postForm('/api/messages',{high:high, med:med, low:low}).then(function(r){
+    if(r.ok){ S.msgHigh=high; S.msgMedium=med; S.msgLow=low; toast('บันทึกแล้ว ✓'); } else toast('ผิดพลาด');
+  });
+}
+
+/* ---- Morning report ---- */
+var _mHour=null;
+function viewMorning(){
+  if(_mHour===null) _mHour=S.morningHour;
+  var h='<div class="card pad r18" style="margin-bottom:16px;"><div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;"><span style="font-size:16px;color:#1C1C1E;">เปิดใช้งานรายงานเช้า</span>'
+    +'<div id="m_tog" class="toggle" style="background:'+(S.morningEnabled?'#34C759':'#E5E5EA')+';" onclick="toggleMorning()"><div class="knob" style="left:'+(S.morningEnabled?22:2)+'px;"></div></div></div></div>';
+  h+='<div class="card pad r18" style="margin-bottom:16px;"><div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;"><span style="font-size:16px;color:#1C1C1E;">เวลาแจ้งเตือน</span>'
+    +'<div style="display:flex;align-items:center;gap:10px;"><div class="step" onclick="hourStep(-1)">−</div><span id="m_hr" style="font-size:18px;font-weight:600;color:#1C1C1E;min-width:66px;text-align:center;">'+pad2(_mHour)+':00</span><div class="step" onclick="hourStep(1)">+</div></div></div></div>';
+  h+='<div class="card pad r18" style="margin-bottom:12px;"><div style="font-size:13px;font-weight:600;color:#FFB100;margin-bottom:8px;">ข้อความรายงานเช้า</div><textarea id="m_msg" rows="2" oninput="updateMorningPreview()">'+esc(S.msgMorning)+'</textarea></div>';
+  h+='<div style="background:#FFF8E8;border-radius:14px;padding:12px 14px;margin-bottom:16px;"><div style="font-size:11px;color:#A8791A;margin-bottom:4px;">ตัวอย่างข้อความที่จะส่ง</div><div id="m_prev" style="font-size:13px;color:#6B5210;line-height:1.45;">'+esc('☀️ รายงานสถานะ '+pad2(_mHour)+':00 น. '+S.msgMorning)+'</div></div>';
+  h+='<div class="note">ระบบจะส่งข้อความนี้ไปยัง Telegram ทุกเช้าเวลา '+pad2(_mHour)+':00 น. เพื่อยืนยันว่าอุปกรณ์ออนไลน์</div>';
+  h+='<div class="btn btn-primary" onclick="saveMorning()">บันทึก</div>';
+  return h;
+}
+function toggleMorning(){ S.morningEnabled=!S.morningEnabled; var t=$('m_tog'); t.style.background=S.morningEnabled?'#34C759':'#E5E5EA'; t.firstChild.style.left=(S.morningEnabled?22:2)+'px'; }
+function hourStep(d){ _mHour=(_mHour+d+24)%24; $('m_hr').textContent=pad2(_mHour)+':00'; updateMorningPreview(); }
+function updateMorningPreview(){ var msg=$('m_msg')?$('m_msg').value:S.msgMorning; $('m_prev').textContent='☀️ รายงานสถานะ '+pad2(_mHour)+':00 น. '+msg; }
+function saveMorning(){
+  var msg=$('m_msg').value;
+  postForm('/api/morning',{enabled:S.morningEnabled?1:0, hour:_mHour, msg:msg}).then(function(r){
+    if(r.ok){ S.morningHour=_mHour; S.msgMorning=msg; toast('บันทึกแล้ว ✓'); } else toast('ผิดพลาด');
+  });
+}
+
+/* ---- ADC calibration ---- */
+function viewCalib(){
+  var h='<div class="row-between" style="background:#EAF0FF;border-radius:14px;padding:14px 16px;margin-bottom:16px;">'
+    +'<div><div style="font-size:12px;color:#5A6B8C;">ค่าที่อ่านได้ปัจจุบัน</div><div style="font-size:22px;font-weight:700;color:#0A84FF;"><span id="cal_adc">'+S.adc+'</span> <span style="font-size:13px;font-weight:600;color:#8E8E93;">ADC</span></div></div>'
+    +'<div style="text-align:right;"><div style="font-size:12px;color:#5A6B8C;">กระแส</div><div style="font-size:22px;font-weight:700;color:#0A84FF;"><span id="cal_ma">'+S.ma+'</span> <span style="font-size:13px;font-weight:600;color:#8E8E93;">mA</span></div></div>'
+  +'</div>';
+  h+='<div class="card r18" style="padding:4px 16px;margin-bottom:12px;">'
+    +'<div style="padding:12px 0;border-bottom:.5px solid #E5E5EA;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">ADC ที่ 4mA (0%)</div><input type="number" id="c_min" value="'+S.adcMin+'" style="font-family:monospace;"></div>'
+    +'<div style="padding:12px 0;"><div style="font-size:13px;color:#8E8E93;margin-bottom:6px;">ADC ที่ 20mA (100%)</div><input type="number" id="c_max" value="'+S.adcMax+'" style="font-family:monospace;"></div>'
+  +'</div>';
+  h+='<div class="note">ปรับค่า ADC ให้ตรงกับสัญญาณ 4–20mA หน้างานจริง ระบบเฉลี่ยค่า 16 ครั้งเพื่อกรองสัญญาณรบกวน และใช้ hysteresis กันการแจ้งเตือนซ้ำ</div>';
+  h+='<div class="btn btn-primary" onclick="saveCalib()">บันทึก</div>';
+  return h;
+}
+function updateCalibLive(){ var a=$('cal_adc'), m=$('cal_ma'); if(a) a.textContent=S.adc; if(m) m.textContent=S.ma; }
+function saveCalib(){
+  var mn=+$('c_min').value, mx=+$('c_max').value;
+  if(mx<=mn){ toast('ADC 20mA ต้องมากกว่า 4mA'); return; }
+  postForm('/api/calib',{adcMin:mn, adcMax:mx}).then(function(r){
+    if(r.ok){ S.adcMin=mn; S.adcMax=mx; toast('บันทึกแล้ว ✓'); } else toast(r.error||'ผิดพลาด');
+  });
+}
+
+/* ============================================================
+   TAB BAR + ROUTER
+   ============================================================ */
+function tabbar(){
+  function col(s){ return S.screen===s?'#0A84FF':'#8E8E93'; }
+  return '<div class="tabbar">'
+    +'<div class="tab" onclick="nav(\'dashboard\')"><svg width="24" height="22" viewBox="0 0 24 22"><path d="M12 1l11 9h-3v11H4V10H1l11-9z" fill="'+col('dashboard')+'"></path></svg><span style="color:'+col('dashboard')+';">หน้าหลัก</span></div>'
+    +'<div class="tab" onclick="nav(\'history\')"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z" fill="none" stroke="'+col('history')+'" stroke-width="2"></path><path d="M12 7v5l4 2" stroke="'+col('history')+'" stroke-width="2" fill="none" stroke-linecap="round"></path></svg><span style="color:'+col('history')+';">ประวัติ</span></div>'
+    +'<div class="tab" onclick="nav(\'settings\')"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M12 8a4 4 0 100 8 4 4 0 000-8z" fill="none" stroke="'+col('settings')+'" stroke-width="2"></path><path d="M12 1v3M12 20v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M1 12h3M20 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" stroke="'+col('settings')+'" stroke-width="1.8" stroke-linecap="round"></path></svg><span style="color:'+col('settings')+';">ตั้งค่า</span></div>'
+  +'</div>';
+}
+
+function render(){
+  var body;
+  switch(S.screen){
+    case 'history':    body=viewHistory(); break;
+    case 'settings':   body=viewSettings(); break;
+    case 'device':     body=viewDevice(); break;
+    case 'wifi':       body=viewWifi(); break;
+    case 'telegram':   body=viewTelegram(); break;
+    case 'thresholds': body=viewThresholds(); break;
+    case 'messages':   body=viewMessages(); break;
+    case 'morning':    body=viewMorning(); break;
+    case 'calib':      body=viewCalib(); break;
+    default:           body=viewDashboard();
+  }
+  renderHeader();
+  $('scroll').innerHTML=body;
+  var showTab=['dashboard','history','settings'].indexOf(S.screen)>=0;
+  $('tabbar').innerHTML=showTab?tabbar():'';
+}
+
+function nav(s){
+  if(s!=='morning') _mHour=null;
+  if(s!=='device') S._devPick=null;
+  if(s!=='dashboard') stopSim();
+  S.screen=s;
+  render();
+  $('scroll').scrollTop=0;
+}
+function onSlider(v){ if(S.simulating) toggleSimulate(); applyPercent(+v); updateDashboard(); }
+
+/* expose handlers to inline onclick/oninput */
+Object.assign(window,{
+  nav:nav, setFilter:setFilter, onSlider:onSlider, toggleSimulate:toggleSimulate,
+  connectDevice:connectDevice, connectCloud:connectCloud, setDevMode:setDevMode, useDemo:useDemo, forgetWifi:forgetWifi,
+  toggleToken:toggleToken, onTokenEdit:onTokenEdit, saveTelegram:saveTelegram, testTelegram:testTelegram,
+  saveThresholds:saveThresholds, saveMessages:saveMessages,
+  toggleMorning:toggleMorning, hourStep:hourStep, updateMorningPreview:updateMorningPreview, saveMorning:saveMorning,
+  saveCalib:saveCalib
+});
+
+/* ============================================================
+   BOOT
+   ============================================================ */
+render();
+tickClock();
+setInterval(tickClock, 15000);
+if(S.mode==='lan' && base()){
+  poll().then(function(ok){ if(!ok) toast('เชื่อมต่ออุปกรณ์ไม่ได้ — แสดงข้อมูลล่าสุด'); });
+} else if(S.mode==='cloud' && S.cloudUrl){
+  mqttConnect();
+}
+setInterval(function(){ if(S.mode==='lan') poll(); }, 2000);
+
+/* service worker (offline shell) */
+if('serviceWorker' in navigator){
+  window.addEventListener('load', function(){ navigator.serviceWorker.register('./sw.js').catch(function(){}); });
+}
+</script>
+</body>
+</html>

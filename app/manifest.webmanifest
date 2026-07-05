@@ -1,0 +1,18 @@
+{
+  "name": "ระบบตรวจสอบน้ำ",
+  "short_name": "Water Monitor",
+  "description": "ตรวจสอบระดับน้ำแบบเรียลไทม์จากอุปกรณ์ ESP32 พร้อมแจ้งเตือน Telegram",
+  "lang": "th",
+  "dir": "ltr",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F2F2F7",
+  "theme_color": "#F2F2F7",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
